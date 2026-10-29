@@ -1,6 +1,5 @@
 import unittest
 
-
 from aiosellers.funpay.exceptions import MessageNotDeliveredError
 from aiosellers.funpay.raw.chats import RawChats
 

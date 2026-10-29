@@ -208,3 +208,6 @@ __marimo__/
 
 .idea/
 /.idea/
+
+# Local audit notes
+/audit.md
