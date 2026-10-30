@@ -5,7 +5,7 @@ import inspect
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from .api import AccountAPI, ChatAPI, DealAPI, GameAPI, ItemAPI, TransactionAPI
 from .client_config import PlayerokClientConfig
@@ -97,6 +97,11 @@ class Playerok:
         if self._raw is None or self._transport is None:
             raise RuntimeError("Client is not started. Call start() or start_polling() first.")
         return self._raw
+
+    def _require_me_id(self) -> str:
+        if self._me_id is None:
+            raise RuntimeError("Client is not started. Call start() or start_polling() first.")
+        return self._me_id
 
     async def __aenter__(self) -> Playerok:
         await self.start()
@@ -253,8 +258,8 @@ class Playerok:
         if fn is None:
             return register
         if inspect.iscoroutinefunction(fn):
-            return register(fn)
-        return lambda func: register(func, predicate=fn)
+            return register(cast(Handler, fn))
+        return lambda func: register(func, predicate=cast(Predicate, fn))
 
     async def _dispatch(self, event: PlayerokEvent) -> None:
         if event.type is EventTypes.CHAT_INITIALIZED:

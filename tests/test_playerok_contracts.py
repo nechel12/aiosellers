@@ -3,7 +3,10 @@ import unittest
 from aiosellers.playerok.core.constants import BASE_HEADERS, EXAMPLE_USER_AGENTS
 from aiosellers.playerok.core.exceptions import GraphQLError, PersistedQueryExpired
 from aiosellers.playerok.core.utils import _raise_on_gql_errors
+from aiosellers.playerok.entities.chat import Chat
 from aiosellers.playerok.listener import _DRIFT_WARNED, parse_chat, parse_chat_message
+from aiosellers.playerok.schemas.basic import _WARNED_MODELS
+from aiosellers.playerok.schemas.chats import Moderator
 
 
 class GraphQLErrorTests(unittest.TestCase):
@@ -20,7 +23,14 @@ class GraphQLErrorTests(unittest.TestCase):
             _raise_on_gql_errors(payload)
 
     def test_persisted_query_code_without_marker_is_still_detected(self):
-        payload = {"errors": [{"message": "unknown query", "extensions": {"code": "PERSISTED_QUERY_HASH_MISMATCH"}}]}
+        payload = {
+            "errors": [
+                {
+                    "message": "unknown query",
+                    "extensions": {"code": "PERSISTED_QUERY_HASH_MISMATCH"},
+                }
+            ]
+        }
         with self.assertRaises(PersistedQueryExpired):
             _raise_on_gql_errors(payload)
 
@@ -74,3 +84,61 @@ class UserAgentTests(unittest.TestCase):
         for agent in EXAMPLE_USER_AGENTS:
             self.assertIn(f"Chrome/{major}.", agent)
             self.assertIn("Macintosh", agent)
+
+
+class ChatEntityTests(unittest.IsolatedAsyncioTestCase):
+    async def test_iter_messages_returns_an_async_iterator(self):
+        class Messages:
+            async def iter(self, chat_id):
+                yield f"message-for-{chat_id}"
+
+        class Chats:
+            messages = Messages()
+
+        class Client:
+            chats = Chats()
+
+        chat = Chat(id="c1")
+        chat._client = Client()
+
+        messages = [message async for message in chat.iter_messages()]
+
+        self.assertEqual(messages, ["message-for-c1"])
+
+
+class AccountSchemaTests(unittest.TestCase):
+    def test_null_last_item_created_at_is_accepted(self):
+        from aiosellers.playerok.schemas import Account
+
+        account = Account.model_validate(
+            {
+                "id": "1",
+                "username": "seller",
+                "email": "seller@example.com",
+                "role": "USER",
+                "hasFrozenBalance": False,
+                "supportChatId": "support",
+                "systemChatId": "system",
+                "unreadChatsCounter": 0,
+                "isBlocked": False,
+                "createdAt": "2026-01-01T00:00:00Z",
+                "lastItemCreatedAt": None,
+                "hasConfirmedPhoneNumber": False,
+                "canPublishItems": True,
+                "isFundsProtectionActive": False,
+            }
+        )
+
+        self.assertIsNone(account.last_item_created_at)
+
+
+class UnimplementedModelTests(unittest.TestCase):
+    def setUp(self):
+        _WARNED_MODELS.clear()
+
+    def test_unimplemented_model_warns_once(self):
+        with self.assertLogs("aiosellers.playerok.schemas.basic", level="WARNING") as logs:
+            Moderator(id="1")
+            Moderator(id="2")
+
+        self.assertEqual(len(logs.records), 1)

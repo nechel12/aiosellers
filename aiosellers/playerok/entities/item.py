@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from ..core.types import ImageInput
 from ..schemas.enums import ItemStatuses, PriorityTypes
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -37,7 +38,10 @@ class Item:
         return self._client
 
     async def refresh(self) -> Item:
-        return await self._require_client().items.get(self.id, force_refresh=True)
+        item = await self._require_client().items.get(self.id, force_refresh=True)
+        if item is None:
+            raise RuntimeError(f"Item {self.id} was not found")
+        return item
 
     async def get_category(self) -> GameCategory | None:
         if not self.category_id:
@@ -132,9 +136,9 @@ class MyItem(Item):
         options: dict[str, str] | list | None = None,
         data_fields: dict[str, str] | list | None = None,
         remove_attachments: list[str] | None = None,
-        add_attachments: list[str] | None = None,
+        add_attachments: list[ImageInput] | None = None,
     ) -> MyItem:
-        return await self._require_client().items.update(
+        item = await self._require_client().items.update(
             self.id,
             name=name,
             price=price,
@@ -144,15 +148,27 @@ class MyItem(Item):
             remove_attachments=remove_attachments,
             add_attachments=add_attachments,
         )
+        if item is None:
+            raise RuntimeError(f"Item {self.id} was not found after update")
+        return item
 
     async def remove(self) -> bool:
         return await self._require_client().items.remove(self.id)
 
     async def publish(self, *, premium: bool = False) -> MyItem:
-        return await self._require_client().items.publish(self.id, premium=premium)
+        item = await self._require_client().items.publish(self.id, premium=premium)
+        if item is None:
+            raise RuntimeError(f"Item {self.id} was not found after publishing")
+        return item
 
     async def set_normal_priority(self) -> MyItem:
-        return await self._require_client().items.set_normal_priority(self.id)
+        item = await self._require_client().items.set_normal_priority(self.id)
+        if item is None:
+            raise RuntimeError(f"Item {self.id} was not found after priority update")
+        return item
 
     async def set_premium_priority(self) -> MyItem:
-        return await self._require_client().items.set_premium_priority(self.id)
+        item = await self._require_client().items.set_premium_priority(self.id)
+        if item is None:
+            raise RuntimeError(f"Item {self.id} was not found after priority update")
+        return item

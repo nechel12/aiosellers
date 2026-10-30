@@ -18,7 +18,7 @@ class Account(ApiModel):
     is_blocked: bool = Field(..., alias="isBlocked")
     is_blocked_for: Any = Field(None, alias="isBlockedFor")
     created_at: datetime = Field(..., alias="createdAt")
-    last_item_created_at: datetime = Field(None, alias="lastItemCreatedAt")
+    last_item_created_at: datetime | None = Field(None, alias="lastItemCreatedAt")
     has_confirmed_phone_number: bool = Field(..., alias="hasConfirmedPhoneNumber")
     can_publish_items: bool = Field(..., alias="canPublishItems")
     is_funds_protection_active: bool = Field(..., alias="isFundsProtectionActive")

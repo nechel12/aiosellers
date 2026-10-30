@@ -147,7 +147,7 @@ class PlayerokTransport:
             request_headers.update(headers)
 
         if not url.startswith("http"):
-            url = self._config.base_url + url
+            url = self._config.base_url.rstrip("/") + "/" + url.lstrip("/")
 
         payload = payload or {}
         # POST is not idempotent, so only GET is retried automatically.
@@ -172,7 +172,9 @@ class PlayerokTransport:
 
             retry_after = _retry_after(getattr(response, "headers", None))
             if status == 429:
-                last_error = RateLimitedError(f"Playerok rate limited the request: HTTP 429 ({url})")
+                last_error = RateLimitedError(
+                    f"Playerok rate limited the request: HTTP 429 ({url})"
+                )
                 if attempt + 1 >= attempts:
                     raise last_error
                 await asyncio.sleep(_backoff(attempt, retry_after))

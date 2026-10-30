@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 from typing import TYPE_CHECKING, AsyncIterator
 
 from ..core.exceptions import MessageNotDeliveredError
@@ -49,7 +50,7 @@ class ChatMessagesAPI:
 
     async def list(
         self, chat_id: str, *, limit: int = 50, cursor: str | None = None
-    ) -> list[ChatMessage]:
+    ) -> builtins.list[ChatMessage]:
         result = []
         remain = limit
         current_cursor = cursor
@@ -152,7 +153,7 @@ class ChatAPI:
         status: ChatStatuses | None = None,
         user_id: str | None = None,
         unread_only: bool = False,
-    ) -> list[Chat]:
+    ) -> builtins.list[Chat]:
         result = []
         remain = limit
         current_cursor = cursor
@@ -265,8 +266,8 @@ class ChatAPI:
         *,
         limit: int = 24,
         cursor: str | None = None,
-    ) -> list[MessageTemplate]:
-        result: list[MessageTemplate] = []
+    ) -> builtins.list[MessageTemplate]:
+        result: builtins.list[MessageTemplate] = []
         remain = limit
         current_cursor = cursor
         while remain > 0:

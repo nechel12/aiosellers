@@ -62,8 +62,8 @@ class Chat:
     async def get_messages(self, limit: int = 50) -> list[ChatMessage]:
         return await self._require_client().chats.messages.list(self.id, limit=limit)
 
-    async def iter_messages(self) -> AsyncIterator[ChatMessage]:
-        return await self._require_client().chats.messages.iter(self.id)
+    def iter_messages(self) -> AsyncIterator[ChatMessage]:
+        return self._require_client().chats.messages.iter(self.id)
 
     async def get_user(self) -> User | None:
         if not self.user_id:
@@ -74,7 +74,7 @@ class Chat:
         from .deal import Deal
 
         client = self._require_client()
-        schema = await client._raw.chats.get_chat(self.id)
+        schema = await client._require_raw().chats.get_chat(self.id)
         if schema is None or not schema.deals:
             return []
 
@@ -94,7 +94,10 @@ class Chat:
         return deals
 
     async def refresh(self) -> Chat:
-        return await self._require_client().chats.get(self.id, force_refresh=True)
+        chat = await self._require_client().chats.get(self.id, force_refresh=True)
+        if chat is None:
+            raise RuntimeError(f"Chat {self.id} was not found")
+        return chat
 
     @property
     def is_direct(self):

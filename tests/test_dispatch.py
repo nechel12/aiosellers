@@ -83,9 +83,7 @@ class PlayerokDispatchTests(unittest.IsolatedAsyncioTestCase):
 class FunPayDispatchTests(unittest.IsolatedAsyncioTestCase):
     async def test_slow_handler_times_out_without_blocking_others(self):
         client = FunPay(
-            FunPayClientConfig(
-                golden_key="key", handler_timeout=0.05, max_concurrent_handlers=4
-            )
+            FunPayClientConfig(golden_key="key", handler_timeout=0.05, max_concurrent_handlers=4)
         )
         done = []
 

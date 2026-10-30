@@ -105,7 +105,7 @@ class RawGamesService:
 
     async def accept_game_category_agreement(
         self, agreement_id: str, user_id: str
-    ) -> GameCategoryAgreement:
+    ) -> GameCategoryAgreement | None:
         response = await self._transport.request(
             "post",
             "graphql",
@@ -225,5 +225,5 @@ class RawGamesService:
 
         data = _dig(raw, ("data", "gameCategory"))
         if data is None:
-            return None
+            return []
         return [GameCategoryOption(**op) for op in data.get("options", [])]

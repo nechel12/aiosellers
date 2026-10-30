@@ -49,7 +49,13 @@ async def _no_sleep(_delay):
 
 
 class TransportTestBase(unittest.IsolatedAsyncioTestCase):
-    def make_transport(self, session_responses=None, download_responses=None):
+    def make_transport(
+        self,
+        session_responses=None,
+        download_responses=None,
+        *,
+        base_url="https://playerok.com/",
+    ):
         self.session = _FakeClient(session_responses)
         self.download = _FakeClient(download_responses)
         self.created = []
@@ -63,12 +69,17 @@ class TransportTestBase(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(patcher.stop)
         transport = PlayerokTransport(
             access_token="token",
-            config=PlayerokConfig(base_url="https://playerok.com/"),
+            config=PlayerokConfig(base_url=base_url),
         )
         return transport
 
 
 class RequestTests(TransportTestBase):
+    async def test_base_url_without_trailing_slash_is_normalized(self):
+        transport = self.make_transport([_Response()], base_url="https://playerok.com")
+        await transport.request("post", "graphql", {"query": "x"})
+        self.assertEqual(self.session.calls[0][1], "https://playerok.com/graphql")
+
     async def test_get_retries_on_server_error(self):
         transport = self.make_transport([_Response(503), _Response(200)])
         with mock.patch.object(tls.asyncio, "sleep", _no_sleep):
@@ -92,8 +103,9 @@ class RequestTests(TransportTestBase):
 
     async def test_get_raises_after_too_many_rate_limits(self):
         transport = self.make_transport([_Response(429), _Response(429), _Response(429)])
-        with mock.patch.object(tls.asyncio, "sleep", _no_sleep), self.assertRaises(
-            RateLimitedError
+        with (
+            mock.patch.object(tls.asyncio, "sleep", _no_sleep),
+            self.assertRaises(RateLimitedError),
         ):
             await transport.request("get", "/graphql")
         self.assertEqual(len(self.session.calls), 3)
@@ -173,8 +185,9 @@ class DownloadTests(TransportTestBase):
                 _Response(429, headers={"retry-after": "0"}),
             ]
         )
-        with mock.patch.object(tls.asyncio, "sleep", _no_sleep), self.assertRaises(
-            RateLimitedError
+        with (
+            mock.patch.object(tls.asyncio, "sleep", _no_sleep),
+            self.assertRaises(RateLimitedError),
         ):
             await transport.download("https://playerok.com/pic.png")
         self.assertEqual(len(self.download.calls), 3)

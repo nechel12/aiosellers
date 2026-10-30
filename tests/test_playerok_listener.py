@@ -100,7 +100,14 @@ class FrameLifecycleTests(unittest.IsolatedAsyncioTestCase):
         operations = sorted(frame["payload"]["operationName"] for frame in listener._ws.frames)
         self.assertEqual(
             operations,
-            ["chatMessageCreated", "chatMessageCreated", "chatUpdated", "chatUpdated", "userUpdated", "userUpdated"],
+            [
+                "chatMessageCreated",
+                "chatMessageCreated",
+                "chatUpdated",
+                "chatUpdated",
+                "userUpdated",
+                "userUpdated",
+            ],
         )
 
     async def test_complete_resubscribes_chat_subscription(self):
@@ -130,7 +137,9 @@ class FrameLifecycleTests(unittest.IsolatedAsyncioTestCase):
         listener = EventListener(_Client())
 
         self.assertEqual(await listener.handle_frame({"type": "error", "payload": ["boom"]}), [])
-        self.assertEqual(await listener.handle_frame({"type": "connection_error", "payload": {}}), [])
+        self.assertEqual(
+            await listener.handle_frame({"type": "connection_error", "payload": {}}), []
+        )
 
 
 class ResyncTests(unittest.IsolatedAsyncioTestCase):

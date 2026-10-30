@@ -264,7 +264,6 @@ class KnownChatTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen, ["Opglisive shop"])
 
 
-
 class ChatReviewTests(unittest.TestCase):
     def test_deal_testimonial_profile_does_not_reject_the_chat(self) -> None:
         chat = ChatSchema.model_validate(
@@ -315,6 +314,7 @@ class ChatReviewTests(unittest.TestCase):
         self.assertEqual(review.status, "APPROVED")
         self.assertEqual(review.rating, 5)
         self.assertIsNotNone(review.created_at)
+
 
 if __name__ == "__main__":
     unittest.main()

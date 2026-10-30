@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 from typing import TYPE_CHECKING, AsyncIterator
 
 from ..entities.game import (
@@ -47,7 +48,9 @@ class GameAPI:
             force_refresh: Reserved for future caching. Currently has no effect.
         """
         _ = force_refresh  # reserved for future caching
-        schema = await self._client._require_raw().games.get_game_category(game_id=game_id, slug=slug, id=id)
+        schema = await self._client._require_raw().games.get_game_category(
+            game_id=game_id, slug=slug, id=id
+        )
         if schema is None:
             return None
 
@@ -116,7 +119,7 @@ class GameAPI:
         cursor: str | None = None,
         type: GameType | None = None,
         search: str | None = None,
-    ) -> list[Game]:
+    ) -> builtins.list[Game]:
         result = []
         remain = limit
         current_cursor = cursor
@@ -169,7 +172,7 @@ class GameAPI:
 
     # --- Sub-entity methods ---
 
-    async def get_category_options(self, category_id: str) -> list[GameCategoryOption]:
+    async def get_category_options(self, category_id: str) -> builtins.list[GameCategoryOption]:
         raw_options = await self._client._require_raw().games.get_game_category_options(
             game_category_id=category_id
         )
@@ -195,8 +198,9 @@ class GameAPI:
                     OptionValue(value=option.value, name=option.label, _option=option_object)
                 )
             elif option.type is GameCategoryOptionTypes.RANGE:
-                minimal_value = min(0, option.value_range_limit.min or 0)
-                maximal_value = max(0, option.value_range_limit.max or 0)
+                value_range = option.value_range_limit
+                minimal_value = min(0, value_range.min or 0) if value_range else 0
+                maximal_value = max(0, value_range.max or 0) if value_range else 0
                 for i in range(minimal_value, maximal_value):
                     option_object.possible_values.append(
                         OptionValue(value=str(i), name=str(i), _option=option_object)
@@ -213,7 +217,7 @@ class GameAPI:
 
     async def get_obtaining_types(
         self, category_id: str, *, cursor: str | None = None, limit: int = 24
-    ) -> list[GameCategoryObtainingType]:
+    ) -> builtins.list[GameCategoryObtainingType]:
         result = []
         remain = limit
         current_cursor = cursor
@@ -230,7 +234,7 @@ class GameAPI:
                 obj = GameCategoryObtainingType(
                     id=schema.id,
                     name=schema.name,
-                    description=schema.description,
+                    description=schema.description or "",
                     category_id=category_id,
                 )
                 obj._client = self._client
@@ -250,18 +254,18 @@ class GameAPI:
         obtaining_type_id: str | None = None,
         cursor: str | None = None,
         limit: int = 24,
-    ) -> list[GameCategoryAgreement]:
+    ) -> builtins.list[GameCategoryAgreement]:
         result = []
         remain = limit
         current_cursor = cursor
-        user_id = self._client._me_id
+        user_id = self._client._require_me_id()
 
         while remain > 0:
             response = await self._client._require_raw().games.get_game_category_agreements(
                 game_category_id=category_id,
                 user_id=user_id,
                 cursor=current_cursor,
-                **({"obtaining_type_id": obtaining_type_id} if obtaining_type_id else {}),
+                obtaining_type_id=obtaining_type_id,
             )
             if response is None or not response.agreements:
                 break
@@ -269,7 +273,7 @@ class GameAPI:
             for schema in response.agreements:
                 obj = GameCategoryAgreement(
                     id=schema.id,
-                    description=schema.description,
+                    description=schema.description or "",
                     type=schema.icon_type,
                     category_id=category_id,
                     obtaining_type_id=obtaining_type_id,
@@ -286,7 +290,7 @@ class GameAPI:
 
     async def accept_agreement(self, agreement_id: str) -> bool:
         resp = await self._client._require_raw().games.accept_game_category_agreement(
-            agreement_id, self._client._me_id
+            agreement_id, self._client._require_me_id()
         )
         return resp is not None
 
@@ -297,7 +301,7 @@ class GameAPI:
         *,
         cursor: str | None = None,
         limit: int = 24,
-    ) -> list[GameCategoryInstruction]:
+    ) -> builtins.list[GameCategoryInstruction]:
         result = []
         remain = limit
         current_cursor = cursor
@@ -335,7 +339,7 @@ class GameAPI:
         *,
         cursor: str | None = None,
         type: GameCategoryDataFieldTypes | None = None,
-    ) -> list[GameCategoryDataField]:
+    ) -> builtins.list[GameCategoryDataField]:
         # Default to ITEM_DATA for seller flow (creating items)
         if type is None:
             type = GameCategoryDataFieldTypes.ITEM_DATA

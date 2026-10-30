@@ -14,7 +14,11 @@ class PlayerokConfig:
     ):
         self.user_agent = user_agent or random.choice(EXAMPLE_USER_AGENTS)
         self.request_timeout = request_timeout or 10.0
-        self.base_url = base_url or os.getenv("PLAYEROK_BASE_URL", "https://playerok.com/")
+        self.base_url: str = (
+            base_url
+            or os.getenv("PLAYEROK_BASE_URL", "https://playerok.com/")
+            or "https://playerok.com/"
+        )
 
     @property
     def headers(self):

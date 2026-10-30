@@ -58,7 +58,10 @@ class Deal:
         return await self._require_client().items.get(id=self.item_id)
 
     async def refresh(self) -> Deal:
-        return await self._require_client().deals.get(self.id, force_refresh=True)
+        deal = await self._require_client().deals.get(self.id, force_refresh=True)
+        if deal is None:
+            raise RuntimeError(f"Deal {self.id} was not found")
+        return deal
 
     async def report_problem(self, description: str, problem_type_id: str) -> Deal:
         return await self._require_client().deals.report_problem(

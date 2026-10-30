@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 from datetime import datetime
 from typing import TYPE_CHECKING, AsyncIterator
 
@@ -42,21 +43,21 @@ class TransactionAPI:
         *,
         limit: int = 24,
         cursor: str | None = None,
-        operation: list[TransactionOperations] | None = None,
-        status: list[TransactionStatuses] | None = None,
-        provider_id: list[TransactionProviderIds] | None = None,
+        operation: builtins.list[TransactionOperations] | None = None,
+        status: builtins.list[TransactionStatuses] | None = None,
+        provider_id: builtins.list[TransactionProviderIds] | None = None,
         min_value: int | None = None,
         max_value: int | None = None,
         from_date: datetime | None = None,
         to_date: datetime | None = None,
-    ) -> list[Transaction]:
-        result: list[Transaction] = []
+    ) -> builtins.list[Transaction]:
+        result: builtins.list[Transaction] = []
         remain = limit
         current_cursor = cursor
 
         while remain > 0:
             response = await self._client._require_raw().transactions.get_transactions(
-                user_id=self._client._me_id,
+                user_id=self._client._require_me_id(),
                 count=min(24, remain),
                 operation=operation,
                 min_value=min_value,
@@ -85,9 +86,9 @@ class TransactionAPI:
         self,
         *,
         cursor: str | None = None,
-        operation: list[TransactionOperations] | None = None,
-        status: list[TransactionStatuses] | None = None,
-        provider_id: list[TransactionProviderIds] | None = None,
+        operation: builtins.list[TransactionOperations] | None = None,
+        status: builtins.list[TransactionStatuses] | None = None,
+        provider_id: builtins.list[TransactionProviderIds] | None = None,
         min_value: int | None = None,
         max_value: int | None = None,
         from_date: datetime | None = None,
@@ -96,7 +97,7 @@ class TransactionAPI:
         current_cursor = cursor
         while True:
             response = await self._client._require_raw().transactions.get_transactions(
-                user_id=self._client._me_id,
+                user_id=self._client._require_me_id(),
                 operation=operation,
                 min_value=min_value,
                 max_value=max_value,
@@ -116,10 +117,10 @@ class TransactionAPI:
 
     async def providers(
         self, direction: TransactionProviderDirections = TransactionProviderDirections.IN
-    ) -> list[TransactionProvider]:
+    ) -> builtins.list[TransactionProvider]:
         return await self._client._require_raw().transactions.get_transaction_providers(direction)
 
-    async def sbp_banks(self) -> list[SBPBankMember]:
+    async def sbp_banks(self) -> builtins.list[SBPBankMember]:
         return await self._client._require_raw().transactions.get_sbp_bank_members()
 
     async def cards(
@@ -128,8 +129,8 @@ class TransactionAPI:
         limit: int = 24,
         cursor: str | None = None,
         direction: SortDirections = SortDirections.ASC,
-    ) -> list[UserBankCard]:
-        result: list[UserBankCard] = []
+    ) -> builtins.list[UserBankCard]:
+        result: builtins.list[UserBankCard] = []
         remain = limit
         current_cursor = cursor
         while remain > 0:

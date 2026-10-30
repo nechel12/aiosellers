@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import builtins
 from typing import TYPE_CHECKING, AsyncIterator
 
 from ..core.types import ImageInput
-from ..entities.game import GameCategoryDataField, GameCategoryOption
+from ..entities.game import (
+    GameCategory,
+    GameCategoryDataField,
+    GameCategoryObtainingType,
+    GameCategoryOption,
+)
 from ..entities.item import Item, MyItem
 from ..schemas import ItemsSortOptions, PriorityTypes
 
@@ -105,7 +111,7 @@ class ItemAPI:
         return item
 
     def _extract_options(
-        self, options: dict[str, str] | list[GameCategoryOption] | None
+        self, options: dict[str, str] | builtins.list[GameCategoryOption] | None
     ) -> dict[str, str] | None:
         if options is None:
             return None
@@ -118,7 +124,7 @@ class ItemAPI:
         return result if result else None
 
     def _extract_data_fields(
-        self, data_fields: dict[str, str] | list[GameCategoryDataField] | None
+        self, data_fields: dict[str, str] | builtins.list[GameCategoryDataField] | None
     ) -> dict[str, str] | None:
         if data_fields is None:
             return None
@@ -163,10 +169,10 @@ class ItemAPI:
         maximal_price: int | None = None,
         has_discount: bool | None = None,
         has_reviews: bool | None = None,
-        attributes: list[dict[str, str]] | None = None,
+        attributes: builtins.list[dict[str, str]] | None = None,
         search: str | None = None,
         sort: ItemsSortOptions | None = None,
-    ) -> list[Item]:
+    ) -> builtins.list[Item]:
         result = []
         remain = limit
         current_cursor = cursor
@@ -211,7 +217,7 @@ class ItemAPI:
         maximal_price: int | None = None,
         has_discount: bool | None = None,
         has_reviews: bool | None = None,
-        attributes: list[dict[str, str]] | None = None,
+        attributes: builtins.list[dict[str, str]] | None = None,
         search: str | None = None,
         sort: ItemsSortOptions | None = None,
     ) -> AsyncIterator[Item]:
@@ -241,7 +247,9 @@ class ItemAPI:
                 break
             current_cursor = response.page_info.end_cursor
 
-    async def list_self(self, *, limit: int = 24, cursor: str | None = None) -> list[MyItem]:
+    async def list_self(
+        self, *, limit: int = 24, cursor: str | None = None
+    ) -> builtins.list[MyItem]:
         result = []
         remain = limit
         current_cursor = cursor
@@ -287,17 +295,17 @@ class ItemAPI:
     async def create(
         self,
         *,
-        category: str | object,
-        obtaining_type: str | object,
+        category: str | GameCategory,
+        obtaining_type: str | GameCategoryObtainingType,
         name: str,
         price: int,
         description: str,
-        options: dict[str, str] | list[GameCategoryOption] | None = None,
-        data_fields: dict[str, str] | list[GameCategoryDataField] | None = None,
-        attachments: list[ImageInput] | None = None,
+        options: dict[str, str] | builtins.list[GameCategoryOption] | None = None,
+        data_fields: dict[str, str] | builtins.list[GameCategoryDataField] | None = None,
+        attachments: builtins.list[ImageInput] | None = None,
     ) -> MyItem | None:
-        category_id = category.id if hasattr(category, "id") else category
-        obtaining_type_id = obtaining_type.id if hasattr(obtaining_type, "id") else obtaining_type
+        category_id = category if isinstance(category, str) else category.id
+        obtaining_type_id = obtaining_type if isinstance(obtaining_type, str) else obtaining_type.id
 
         # Extract options and data_fields
         options_dict = self._extract_options(options)
@@ -325,10 +333,10 @@ class ItemAPI:
         name: str | None = None,
         price: int | None = None,
         description: str | None = None,
-        options: dict[str, str] | list[GameCategoryOption] | None = None,
-        data_fields: dict[str, str] | list[GameCategoryDataField] | None = None,
-        remove_attachments: list[str] | None = None,
-        add_attachments: list[ImageInput] | None = None,
+        options: dict[str, str] | builtins.list[GameCategoryOption] | None = None,
+        data_fields: dict[str, str] | builtins.list[GameCategoryDataField] | None = None,
+        remove_attachments: builtins.list[str] | None = None,
+        add_attachments: builtins.list[ImageInput] | None = None,
     ) -> MyItem | None:
         options_dict = self._extract_options(options)
         data_fields_dict = self._extract_data_fields(data_fields)

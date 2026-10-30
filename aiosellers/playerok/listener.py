@@ -8,7 +8,7 @@ import random
 import uuid
 from collections import deque
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, AsyncIterator
+from typing import TYPE_CHECKING, Any, AsyncIterator, cast
 
 from pydantic import ValidationError
 
@@ -39,15 +39,14 @@ _DRIFT_WARNED: set[tuple[str, str]] = set()
 
 def _warn_drift(kind: str, exc: ValidationError) -> None:
     details = exc.errors()
-    first = details[0] if details else {}
+    first: dict[str, Any] = dict(details[0]) if details else {}
     location = ".".join(str(part) for part in first.get("loc", ())) or first.get("type", "?")
     signature = (kind, location)
     if signature in _DRIFT_WARNED:
         return
     _DRIFT_WARNED.add(signature)
     logger.warning(
-        "Playerok %s payload no longer matches the schema at %s (%s); "
-        "falling back to partial data",
+        "Playerok %s payload no longer matches the schema at %s (%s); falling back to partial data",
         kind,
         location,
         first.get("msg", first.get("type", "unknown")),
@@ -212,6 +211,18 @@ class EventListener:
         self._state_version = 0
         self._state_lock = asyncio.Lock()
 
+    def _raw(self) -> Any:
+        raw = self.client._raw
+        if raw is None:
+            raise RuntimeError("Client is not started. Call start() or start_polling() first.")
+        return raw
+
+    def _me_id(self) -> str:
+        me_id = self.client.me_id
+        if me_id is None:
+            raise RuntimeError("Client is not started. Call start() or start_polling() first.")
+        return me_id
+
     def remember_history(self, chats: list[ChatSchema], *, now: datetime | None = None) -> None:
         moment = now or datetime.now(timezone.utc)
         for chat in chats:
@@ -237,7 +248,7 @@ class EventListener:
         schema = self.remember_chat(schema)
         if getattr(schema, "users", None):
             return schema
-        fetched = await self.client._raw.chats.get_chat(schema.id)
+        fetched = await self._raw().chats.get_chat(schema.id)
         if fetched is None or not getattr(fetched, "users", None):
             return schema
         return self.remember_chat(fetched)
@@ -332,8 +343,8 @@ class EventListener:
         if self.new_chat_pause:
             await asyncio.sleep(self.new_chat_pause)
 
-        page = await self.client._raw.chats.get_chats(
-            user_id=self.client.me_id, count=15, type=self._pm_type()
+        page = await self._raw().chats.get_chats(
+            user_id=self._me_id(), count=15, type=self._pm_type()
         )
         if page is None:
             return []
@@ -363,7 +374,7 @@ class EventListener:
         for deal_id in list(self.review_deal_ids):
             if not self._should_check_review(deal_id):
                 continue
-            schema = await self.client._raw.deals.get_deal(deal_id)
+            schema = await self._raw().deals.get_deal(deal_id)
             if schema is None or schema.review is None:
                 continue
             self.review_deal_ids.remove(deal_id)
@@ -426,11 +437,14 @@ class EventListener:
         for kind in kinds:
             event_cls = _DEAL_EVENT[kind]
             events.append(
-                event_cls(
-                    client=self.client,
-                    chat=chat,
-                    deal=deal,
-                    message=entity_message,
+                cast(
+                    PlayerokEvent,
+                    event_cls(
+                        client=self.client,
+                        chat=chat,
+                        deal=deal,
+                        message=entity_message,
+                    ),
                 )
             )
         return events
@@ -455,7 +469,7 @@ class EventListener:
 
         tasks: list[asyncio.Task[Any]] = []
         if messages:
-            page = await self.client._raw.chats.get_chats(user_id=self.client.me_id, count=24)
+            page = await self._raw().chats.get_chats(user_id=self._me_id(), count=24)
             chats = list(page.chats) if page is not None else []
             self.remember_history(chats)
             for chat_schema in chats:
@@ -503,9 +517,9 @@ class EventListener:
             try:
                 connect = websockets.connect(
                     _WS_URL,
-                    subprotocols=["graphql-transport-ws"],
+                    subprotocols=[cast(Any, "graphql-transport-ws")],
                     additional_headers=self._headers(),
-                    origin="https://playerok.com",
+                    origin=cast(Any, "https://playerok.com"),
                 )
                 async with connect as ws:
                     self._ws = ws
@@ -552,8 +566,8 @@ class EventListener:
     async def _resync(self) -> list[PlayerokEvent]:
         """Pull recent chats after a reconnect: WS does not replay events missed during the gap."""
         try:
-            page = await self.client._raw.chats.get_chats(
-                user_id=self.client.me_id, count=24, type=self._pm_type()
+            page = await self._raw().chats.get_chats(
+                user_id=self._me_id(), count=24, type=self._pm_type()
             )
         except Exception:
             logger.warning("Playerok resync after reconnect failed", exc_info=True)
@@ -606,8 +620,7 @@ class EventListener:
         while not self._stop.is_set():
             now = asyncio.get_running_loop().time()
             if not self._deals_baseline_ready or (
-                self.review_refresh_interval
-                and now - last_refresh >= self.review_refresh_interval
+                self.review_refresh_interval and now - last_refresh >= self.review_refresh_interval
             ):
                 last_refresh = now
                 try:
@@ -637,9 +650,7 @@ class EventListener:
             await self._save_state()
 
     async def _refresh_deals_from_feed(self) -> None:
-        response = await self.client._raw.deals.get_deals(
-            user_id=self.client.me_id, count=24
-        )
+        response = await self._raw().deals.get_deals(user_id=self._me_id(), count=24)
         if response is None:
             return
 
@@ -675,7 +686,7 @@ class EventListener:
     async def _scan_recent_paid(
         self, chat_schema: ChatSchema, now: datetime
     ) -> list[PlayerokEvent]:
-        page = await self.client._raw.chats.get_chat_messages(chat_schema.id, count=12)
+        page = await self._raw().chats.get_chat_messages(chat_schema.id, count=12)
         if page is None:
             return []
         for message in page.messages:
@@ -693,7 +704,7 @@ class EventListener:
         for _ in range(self.refetch_attempts):
             if self.refetch_message_delay:
                 await asyncio.sleep(self.refetch_message_delay)
-            page = await self.client._raw.chats.get_chat_messages(chat_id, count=12)
+            page = await self._raw().chats.get_chat_messages(chat_id, count=12)
             if page is None:
                 continue
             for message in page.messages:
@@ -704,7 +715,7 @@ class EventListener:
     async def _refetch_deal(self, deal_id: str):
         for _ in range(self.refetch_attempts):
             try:
-                deal = await self.client._raw.deals.get_deal(deal_id)
+                deal = await self._raw().deals.get_deal(deal_id)
             except Exception:
                 deal = None
             if deal is not None:

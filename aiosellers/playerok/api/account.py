@@ -18,7 +18,10 @@ class AccountAPI:
 
     async def profile(self) -> AccountProfile:
         me = await self.me()
-        return await self._client._require_raw().account.get_account(me.username)
+        profile = await self._client._require_raw().account.get_account(me.username)
+        if profile is None:
+            raise RuntimeError(f"Account {me.username} was not found")
+        return profile
 
     async def get_user(
         self,
@@ -81,7 +84,7 @@ class AccountAPI:
         current_cursor = cursor
         while remain > 0:
             response = await self._client._require_raw().account.get_reviews(
-                self._client._me_id,
+                self._client._require_me_id(),
                 count=min(24, remain),
                 after_cursor=current_cursor,
                 status=status,

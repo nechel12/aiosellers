@@ -45,7 +45,8 @@ class GameCategoryOption:
     _client: Playerok | None = field(default=None, repr=False, init=False, compare=False)
 
     def set_value(self, value: int | str | bool | OptionValue | None) -> "GameCategoryOption":
-        if hasattr(value, "value"):  # Handle OptionValue
+        val: int | str | bool | None
+        if isinstance(value, OptionValue):
             val = value.value
         else:
             val = str(value).lower() if value is not None else None
@@ -241,7 +242,10 @@ class Game:
         return self._client
 
     async def refresh(self) -> "Game":
-        return await self._require_client().games.get(id=self.id, force_refresh=True)
+        game = await self._require_client().games.get(id=self.id, force_refresh=True)
+        if game is None:
+            raise RuntimeError(f"Game {self.id} was not found")
+        return game
 
     async def get_category(
         self, *, id: str | None = None, slug: str | None = None

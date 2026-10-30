@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 from typing import TYPE_CHECKING, AsyncIterator
 
 from ..entities.deal import Deal
@@ -46,18 +47,18 @@ class DealAPI:
         *,
         limit: int = 24,
         cursor: str | None = None,
-        statuses: list[ItemDealStatuses] | None = None,
+        statuses: builtins.list[ItemDealStatuses] | None = None,
         direction: ItemDealDirections | None = None,
         user_id: str | None = None,
         item_id: str | None = None,
-    ) -> list[Deal]:
+    ) -> builtins.list[Deal]:
         result = []
         remain = limit
         current_cursor = cursor
 
         while remain > 0:
             response = await self._client._require_raw().deals.get_deals(
-                user_id=self._client._me_id,
+                user_id=self._client._require_me_id(),
                 count=min(24, remain),
                 after_cursor=current_cursor,
                 statuses=statuses,
@@ -97,7 +98,7 @@ class DealAPI:
         self,
         *,
         cursor: str | None = None,
-        statuses: list[ItemDealStatuses] | None = None,
+        statuses: builtins.list[ItemDealStatuses] | None = None,
         direction: ItemDealDirections | None = None,
         user_id: str | None = None,
         item_id: str | None = None,
@@ -106,7 +107,7 @@ class DealAPI:
 
         while True:
             response = await self._client._require_raw().deals.get_deals(
-                user_id=self._client._me_id,
+                user_id=self._client._require_me_id(),
                 after_cursor=current_cursor,
                 statuses=statuses,
                 direction=direction,
@@ -132,18 +133,28 @@ class DealAPI:
                 break
             current_cursor = response.page_info.end_cursor
 
+    async def _get_required(self, deal_id: str) -> Deal:
+        deal = await self.get(deal_id, force_refresh=True)
+        if deal is None:
+            raise RuntimeError(f"Deal {deal_id} was not found")
+        return deal
+
     async def confirm(self, deal_id: str) -> Deal:
         """Confirm DONE work (for buyer)"""
-        updated = await self._client._require_raw().deals.update_deal(deal_id, ItemDealStatuses.CONFIRMED)
+        updated = await self._client._require_raw().deals.update_deal(
+            deal_id, ItemDealStatuses.CONFIRMED
+        )
         if updated is None:
-            return await self.get(deal_id, force_refresh=True)
+            return await self._get_required(deal_id)
         return self._create_deal(updated)
 
     async def complete(self, deal_id: str) -> Deal:
         """Mark PAID work as COMPLETED (sent), ask for confirmation (for seller)"""
-        updated = await self._client._require_raw().deals.update_deal(deal_id, ItemDealStatuses.SENT)
+        updated = await self._client._require_raw().deals.update_deal(
+            deal_id, ItemDealStatuses.SENT
+        )
         if updated is None:
-            return await self.get(deal_id, force_refresh=True)
+            return await self._get_required(deal_id)
         return self._create_deal(updated)
 
     async def report_problem(self, deal_id: str, description: str, problem_type_id: str) -> Deal:
@@ -159,30 +170,34 @@ class DealAPI:
 
     async def cancel(self, deal_id: str) -> Deal:
         """Reject PAID work and refund money (for seller)"""
-        updated = await self._client._require_raw().deals.update_deal(deal_id, ItemDealStatuses.ROLLED_BACK)
+        updated = await self._client._require_raw().deals.update_deal(
+            deal_id, ItemDealStatuses.ROLLED_BACK
+        )
         if updated is None:
-            return await self.get(deal_id, force_refresh=True)
+            return await self._get_required(deal_id)
         return self._create_deal(updated)
 
     def _extract_obtaining_fields(
-        self, fields: dict[str, str] | list | None
+        self, fields: dict[str, str] | builtins.list[object] | None
     ) -> dict[str, str] | None:
         """Extract obtaining fields from dict or list of GameCategoryDataField."""
         if fields is None:
             return None
         if isinstance(fields, dict):
             return fields
-        result = {}
+        result: dict[str, str] = {}
         for field in fields:
-            if hasattr(field, "_input_value") and field._input_value is not None:
-                result[field.id] = field._input_value
+            field_id = getattr(field, "id", None)
+            input_value = getattr(field, "_input_value", None)
+            if isinstance(field_id, str) and input_value is not None:
+                result[field_id] = str(input_value)
         return result if result else None
 
     async def create(
         self,
         item: str | Item,
         *,
-        obtaining_fields: dict[str, str] | list | None = None,
+        obtaining_fields: dict[str, str] | builtins.list[object] | None = None,
         comment: str | None = None,
     ) -> Deal | None:
         """Create a deal to buy an item.

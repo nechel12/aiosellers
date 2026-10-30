@@ -139,7 +139,10 @@ class PlayerokAsyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raw_items.calls, 2)
 
     async def test_priority_methods_select_by_type_not_order(self):
-        statuses = [_priority("prem", PriorityTypes.PREMIUM), _priority("norm", PriorityTypes.DEFAULT)]
+        statuses = [
+            _priority("prem", PriorityTypes.PREMIUM),
+            _priority("norm", PriorityTypes.DEFAULT),
+        ]
         raw_items = _RawPriorityItems(statuses, _item())
         client = _Client(SimpleNamespace(items=raw_items))
         api = ItemAPI(client)
