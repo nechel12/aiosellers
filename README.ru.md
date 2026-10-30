@@ -5,6 +5,7 @@
 [![CI](https://github.com/nechel12/aiosellers/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nechel12/aiosellers/actions/workflows/ci.yml)
 [![License](https://img.shields.io/github/license/nechel12/aiosellers)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![PyPI](https://img.shields.io/pypi/v/aiosellers-nechel12)](https://pypi.org/project/aiosellers-nechel12/)
 [![Last commit](https://img.shields.io/github/last-commit/nechel12/aiosellers)](https://github.com/nechel12/aiosellers/commits/main)
 [![Fork of Zewsic/aiosellers](https://img.shields.io/badge/fork-Zewsic%2Faiosellers-blueviolet?logo=github)](https://github.com/Zewsic/aiosellers)
 [![Security policy](https://img.shields.io/badge/security-policy-green)](SECURITY.md)
@@ -44,8 +45,8 @@
 > адаптер GGsel, общий слой `aiosellers.core` (платформы, возможности,
 > `SellerHub`), персистентное состояние листенеров, усиление транспорта и
 > тесты. Пакет `aiosellers` на PyPI публикует upstream-проект, и он **не**
-> содержит этих изменений — форк ставится из GitHub (см.
-> [Установку](#установка)).
+> содержит этих изменений; форк распространяется как `aiosellers-nechel12`
+> (см. [Установку](#установка)).
 
 Стек: **Python 3.12+**, asyncio, Pydantic v2, TLS-запросы, websockets и SQLite.
 Библиотека общается с площадками напрямую: FunPay — HTTP-формы и разбор HTML,
@@ -58,7 +59,7 @@ PlayerOK — GraphQL и WebSocket-подписки, GGsel — официальн
 
 ## Установка
 
-Установка форка с GitHub (работает уже сейчас):
+Установка форка с GitHub:
 
 ```bash
 pip install "git+https://github.com/nechel12/aiosellers.git"
@@ -71,14 +72,14 @@ uv add "git+https://github.com/nechel12/aiosellers.git"
 ```
 
 Имя дистрибутива — `aiosellers-nechel12`, импортируемый пакет по-прежнему
-`aiosellers`. После публикации первого релиза на PyPI будет работать и так:
+`aiosellers`. Установка с PyPI:
 
 ```bash
 pip install aiosellers-nechel12
 ```
 
 `pip install aiosellers` устанавливает **upstream-пакет** с PyPI, а не этот
-форк. Для воспроизводимых установок фиксируйте коммит или тег:
+форк. Для воспроизводимых установок фиксируй коммит или тег:
 
 ```bash
 pip install "git+https://github.com/nechel12/aiosellers.git@<tag>"
@@ -103,7 +104,11 @@ export GGSEL_API_KEY="your_api_key"
 export GGSEL_SELLER_ID="123456"
 ```
 
-Укажите `bot_mark=False` в `FunPayClientConfig`, чтобы не добавлять невидимую
+`Playerok()`, `FunPay()` и `GGsel()` читают эти переменные. Учётные данные
+можно передать и напрямую: `Playerok("token")`, `FunPay("golden-key")` или
+`GGsel(GGselClientConfig(api_key="key", seller_id=123456))`.
+
+Укажи `bot_mark=False` в `FunPayClientConfig`, чтобы не добавлять невидимую
 бот-метку в исходящие сообщения и отзывы.
 
 ## Быстрый старт: PlayerOK
@@ -167,6 +172,12 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
+`GGsel()` читает `GGSEL_API_KEY` и `GGSEL_SELLER_ID`; чтобы переопределить
+значения, передай `GGselClientConfig`. `client.seller_id` появляется после
+запуска клиента, а `client.products.update_price()` / `update_prices()`
+возвращают id задачи, который можно проверить через
+`client.products.task_status()`.
+
 ## Хаб для нескольких аккаунтов
 
 `SellerHub` запускает несколько сессий FunPay, Playerok и GGsel вместе и
@@ -217,7 +228,7 @@ asyncio.run(main())
 
 ## Персистентное состояние листенеров
 
-Передайте `StateStore` в конфиг клиента, чтобы сохранять курсоры чатов,
+Передай `StateStore` в конфиг клиента, чтобы сохранять курсоры чатов,
 обработанные id сообщений и снимки заказов между перезапусками процесса. Без
 хранилища листенеры собирают состояние заново при каждом запуске и отдают
 только начальные снимки.
@@ -270,7 +281,7 @@ asyncio.run(main())
 | [`funpay_account.py`](examples/funpay_account.py) | Профиль, баланс, транзакции |
 | [`funpay_orders.py`](examples/funpay_orders.py) | Продажи и карточка заказа |
 | [`funpay_chats.py`](examples/funpay_chats.py) | Чаты и история сообщений |
-| [`funpay_lots.py`](examples/funpay_lots.py) | Ваши лоты |
+| [`funpay_lots.py`](examples/funpay_lots.py) | Твои лоты |
 | [`funpay_bot.py`](examples/funpay_bot.py) | Новый заказ и ответ в чате |
 | [`funpay_reviews.py`](examples/funpay_reviews.py) | Ответ на новый отзыв |
 | [`funpay_backtest.py`](examples/funpay_backtest.py) | Воспроизведение сохранённой истории чата |
@@ -332,22 +343,22 @@ GGsel покрыт официальным Seller API V1 (`https://seller.ggsel.c
 
 - У FunPay и PlayerOK нет официальных seller API; эти адаптеры используют те же
   HTTP-формы, GraphQL-документы и WebSocket-потоки, что и сайты. Изменения на
-  площадках могут их сломать, поэтому фиксируйте версию и следите за
+  площадках могут их сломать, поэтому фиксируй версию и следи за
   [CHANGELOG](CHANGELOG.md).
 - GGsel реализован только для Seller API V1.
 - Библиотека — клиент, а не планировщик: цикл событий, деплой, масштабирование
-  и присмотр за ботами остаются на вас.
+  и присмотр за ботами остаются на тебе.
 - Правила площадок, лимиты и блокировки аккаунтов вне контроля библиотеки.
-  Используйте API ответственно и на свой риск.
+  Используй API ответственно и на свой риск.
 
 ## Безопасность
 
 Отчёты об уязвимостях — в [SECURITY.md](SECURITY.md). Библиотека хранит токены
 в памяти, передаёт их только эндпоинтам площадок и держит состояние листенеров
-в переданном вами `StateStore`. Не логируйте учётные данные и защищайте файл
+в переданном тобой `StateStore`. Не логируй учётные данные и защищай файл
 SQLite, если в нём есть метаданные чатов.
 
-Сообщайте об уязвимостях через приватные GitHub-адвизори, а не в публичном
+Сообщай об уязвимостях через приватные GitHub-адвизори, а не в публичном
 issue.
 
 ## Разработка
@@ -385,9 +396,9 @@ uv build
 ## Участие
 
 Багрепорты и pull request'ы приветствуются. Процесс разработки описан в
-[CONTRIBUTING.md](CONTRIBUTING.md). Участвуя, вы соглашаетесь с
-[Кодексом поведения](CODE_OF_CONDUCT.md). Перед отправкой изменений запустите
-`uv run ruff check .` и `uv run pytest -q`. Об уязвимостях сообщайте через
+[CONTRIBUTING.md](CONTRIBUTING.md). Участвуя, ты соглашаешься с
+[Кодексом поведения](CODE_OF_CONDUCT.md). Перед отправкой изменений запусти
+`uv run ruff check .` и `uv run pytest -q`. Об уязвимостях сообщай через
 [SECURITY.md](SECURITY.md), а не в публичном issue. Заметки о релизах — в
 [CHANGELOG.md](CHANGELOG.md); мейнтейнерам — [RELEASING.md](RELEASING.md).
 
@@ -402,7 +413,7 @@ uv build
 ## Поддержать проект
 
 All-In-One Sellers API — бесплатный проект с открытым исходным кодом. Если он
-экономит вам время, вы можете поддержать разработку:
+экономит тебе время, ты можешь поддержать разработку:
 
 <p align="center">
   <a href="https://boosty.to/nechel12/donate">
@@ -420,5 +431,5 @@ All-In-One Sellers API — бесплатный проект с открытым
 | **BNB Smart Chain** | `0x423aF840f67355371bf32480744A84069dfab5ff` |
 
 > [!WARNING]
-> Отправляйте только соответствующий актив в указанной сети. Переводы в другую
+> Отправляй только соответствующий актив в указанной сети. Переводы в другую
 > сеть восстановить нельзя.

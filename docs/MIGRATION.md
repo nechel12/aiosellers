@@ -10,7 +10,7 @@ PyPI project.
 |---|---|
 | GitHub (works now) | `pip install "git+https://github.com/nechel12/aiosellers.git"` |
 | GitHub, pinned | `pip install "git+https://github.com/nechel12/aiosellers.git@v0.3.0"` |
-| PyPI, after first publish | `pip install aiosellers-nechel12` |
+| PyPI | `pip install aiosellers-nechel12` |
 | Upstream (not this fork) | `pip install aiosellers` |
 
 The import package is always:
@@ -38,16 +38,15 @@ import aiosellers
 
 ## Upgrade steps
 
-1. If you installed upstream `aiosellers` from PyPI, uninstall it before
-   installing the fork, or use a separate virtual environment.
-2. Install the fork from GitHub or `aiosellers-nechel12` when available.
+1. Uninstall upstream `aiosellers` before installing the fork, or use a separate
+   virtual environment.
+2. Install the fork from PyPI or GitHub.
 3. Replace any `await chat.iter_messages()` call with `async for message in
    chat.iter_messages():`.
-4. If you pass a custom `base_url`, it may now omit the trailing slash.
-5. If you use `SQLiteStateStore`, `~` in the path is expanded. Existing
-   relative/absolute paths are unchanged.
-6. If you use `SellerHub.stream()`, early exits are now safe even when the
-   queue is full.
+4. A custom `base_url` may now omit the trailing slash.
+5. `SQLiteStateStore` expands `~` in the path. Existing relative/absolute paths
+   are unchanged.
+6. `SellerHub.stream()` early exits are now safe even when the queue is full.
 7. Review the [CHANGELOG](../CHANGELOG.md) for the complete list.
 
 ## State compatibility

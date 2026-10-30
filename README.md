@@ -5,6 +5,7 @@
 [![CI](https://github.com/nechel12/aiosellers/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nechel12/aiosellers/actions/workflows/ci.yml)
 [![License](https://img.shields.io/github/license/nechel12/aiosellers)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![PyPI](https://img.shields.io/pypi/v/aiosellers-nechel12)](https://pypi.org/project/aiosellers-nechel12/)
 [![Last commit](https://img.shields.io/github/last-commit/nechel12/aiosellers)](https://github.com/nechel12/aiosellers/commits/main)
 [![Fork of Zewsic/aiosellers](https://img.shields.io/badge/fork-Zewsic%2Faiosellers-blueviolet?logo=github)](https://github.com/Zewsic/aiosellers)
 [![Security policy](https://img.shields.io/badge/security-policy-green)](SECURITY.md)
@@ -42,8 +43,9 @@ and **GGsel**. One package, one event model, one multi-account hub.
 > [@nechel12](https://github.com/nechel12). The fork adds the GGsel adapter, the
 > shared `aiosellers.core` layer (platforms, capabilities, `SellerHub`), durable
 > listener state, transport hardening and tests. The `aiosellers` package on PyPI
-> is published by the upstream project and does **not** contain these changes —
-> install the fork from GitHub (see [Installation](#installation)).
+> is published by the upstream project and does **not** contain these changes;
+> the fork is distributed as `aiosellers-nechel12` (see
+> [Installation](#installation)).
 
 Stack: **Python 3.12+**, asyncio, Pydantic v2, TLS requests, websockets and
 SQLite. The library talks to the platforms directly: FunPay over HTTP forms and
@@ -70,8 +72,8 @@ or via uv:
 uv add "git+https://github.com/nechel12/aiosellers.git"
 ```
 
-The distribution name is `aiosellers-nechel12` and the import package remains
-`aiosellers`. Once the first PyPI release is published, this also works:
+The distribution name is `aiosellers-nechel12`; the import package remains
+`aiosellers`. Install it from PyPI:
 
 ```bash
 pip install aiosellers-nechel12
@@ -102,6 +104,10 @@ export FUNPAY_GOLDEN_KEY="your_golden_key"
 export GGSEL_API_KEY="your_api_key"
 export GGSEL_SELLER_ID="123456"
 ```
+
+`Playerok()`, `FunPay()` and `GGsel()` read these variables. You can also pass
+credentials directly: `Playerok("token")`, `FunPay("golden-key")` or
+`GGsel(GGselClientConfig(api_key="key", seller_id=123456))`.
 
 Set `bot_mark=False` in `FunPayClientConfig` to stop adding the invisible bot
 marker to outgoing messages and reviews.
@@ -166,6 +172,12 @@ async def main() -> None:
 
 asyncio.run(main())
 ```
+
+`GGsel()` reads `GGSEL_API_KEY` and `GGSEL_SELLER_ID`; pass
+`GGselClientConfig` explicitly to override either value. `client.seller_id` is
+populated after the client starts, and `client.products.update_price()` /
+`update_prices()` return a task id that can be checked with
+`client.products.task_status()`.
 
 ## Multi-account hub
 
@@ -269,7 +281,7 @@ Runnable samples are in [`examples/`](examples/).
 | [`funpay_account.py`](examples/funpay_account.py) | Profile, balance, transactions |
 | [`funpay_orders.py`](examples/funpay_orders.py) | Sales and an order card |
 | [`funpay_chats.py`](examples/funpay_chats.py) | Chats and message history |
-| [`funpay_lots.py`](examples/funpay_lots.py) | Your lots |
+| [`funpay_lots.py`](examples/funpay_lots.py) | Lots |
 | [`funpay_bot.py`](examples/funpay_bot.py) | New order and a chat reply |
 | [`funpay_reviews.py`](examples/funpay_reviews.py) | Reply to a new review |
 | [`funpay_backtest.py`](examples/funpay_backtest.py) | Replay saved chat history |
