@@ -23,6 +23,7 @@ class GGselClientConfig:
         max_concurrent_handlers: How many handlers of one event run in parallel
         poll_interval: Seconds between polling ticks
         state: Optional store for chat cursors and dedup windows across restarts
+        proxy: Proxy URL passed through to tls_requests
     """
 
     api_key: str | None = field(default=None, repr=False)
@@ -36,3 +37,4 @@ class GGselClientConfig:
     max_concurrent_handlers: int = 10
     poll_interval: float = 5.0
     state: StateStore | None = None
+    proxy: str | None = field(default=None, repr=False)

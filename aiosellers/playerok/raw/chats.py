@@ -104,7 +104,9 @@ class RawChatService:
 
         if photo:
             payload = GQL.create_chat_message_with_photo(chat_id=chat_id, text=text)
-            file_obj, should_close = await prepare_image_file(photo)
+            file_obj, should_close = await prepare_image_file(
+                photo, proxy=self._transport.config.proxy
+            )
             try:
                 files = {"1": file_obj}
                 response = await self._transport.request("post", "graphql", payload, files=files)
@@ -145,7 +147,7 @@ class RawChatService:
 
     async def upload_image(self, chat_id: str, image: ImageInput) -> TemporaryAttachment | None:
         payload = GQL.upload_chat_image(chat_id, str(uuid.uuid4()))
-        file_obj, should_close = await prepare_image_file(image)
+        file_obj, should_close = await prepare_image_file(image, proxy=self._transport.config.proxy)
         try:
             response = await self._transport.request(
                 "post", "graphql", payload, files={"1": file_obj}

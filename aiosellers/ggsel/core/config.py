@@ -14,6 +14,7 @@ class GGselConfig:
         request_timeout: float | None = None,
         base_url: str | None = None,
         locale: str = "ru-RU",
+        proxy: str | None = None,
     ):
         self.user_agent = user_agent or DEFAULT_USER_AGENT
         self.request_timeout = request_timeout or 10.0
@@ -21,6 +22,7 @@ class GGselConfig:
             base_url or os.getenv("GGSEL_BASE_URL", DEFAULT_BASE_URL) or DEFAULT_BASE_URL
         )
         self.locale = locale
+        self.proxy = proxy
 
     @property
     def headers(self) -> dict[str, str]:

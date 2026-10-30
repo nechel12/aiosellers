@@ -46,7 +46,8 @@ class _Client:
     _use_identity_map = False
     me_id = "me"
     _transport = SimpleNamespace(
-        _access_token="token", config=SimpleNamespace(user_agent="test-agent")
+        _access_token="token",
+        config=SimpleNamespace(user_agent="test-agent", proxy=None),
     )
 
     def __init__(self, chats=None, deals=None):
@@ -192,6 +193,19 @@ class SocketLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(connect.call_count, 2)
         sleep.assert_awaited_once()
+
+    async def test_configured_proxy_is_passed_to_websocket(self):
+        listener = EventListener(_Client())
+        proxy = "http://user:pass@proxy:8080"
+        listener.client._transport = SimpleNamespace(
+            _access_token="token",
+            config=SimpleNamespace(user_agent="test-agent", proxy=proxy),
+        )
+        socket = _Socket(listener, stop_on_enter=True)
+        with mock.patch("websockets.connect", return_value=socket) as connect:
+            await asyncio.wait_for(self._drain(listener), 1)
+
+        self.assertEqual(connect.call_args.kwargs["proxy"], proxy)
 
     async def test_connection_error_reconnects(self):
         listener = EventListener(_Client())

@@ -109,6 +109,25 @@ class ImageDownloadTests(unittest.IsolatedAsyncioTestCase):
         for _, kwargs in client.calls:
             self.assertFalse(kwargs["follow_redirects"])
 
+    async def test_remote_image_uses_the_configured_proxy(self):
+        client = _ImageClient([_ImageResponse(content=b"ok")])
+        proxy = "http://user:pass@proxy:8080"
+        with (
+            mock.patch("tls_requests.AsyncClient", return_value=client) as client_class,
+            mock.patch.object(
+                utils.socket,
+                "getaddrinfo",
+                return_value=[_resolved_address("93.184.216.34")],
+            ),
+        ):
+            file_obj, should_close = await prepare_image_file(
+                "https://example.com/image.png", proxy=proxy
+            )
+
+        self.assertEqual(file_obj.getvalue(), b"ok")
+        self.assertFalse(should_close)
+        self.assertEqual(client_class.call_args.kwargs, {"proxy": proxy})
+
     async def test_remote_image_rejects_credentials_and_non_http_urls(self):
         with self.assertRaises(ValueError):
             await prepare_image_file("https://user:pass@example.com/image.png")

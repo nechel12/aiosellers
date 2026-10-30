@@ -20,6 +20,7 @@ class PlayerokClientConfig:
         handler_timeout: Max seconds a single event handler may run (None disables)
         max_concurrent_handlers: How many handlers of one event run in parallel
         state: Optional store for cursors and dedup windows that survive restarts
+        proxy: Proxy URL used for HTTP, downloads and WebSocket connections
     """
 
     access_token: str | None = field(default=None, repr=False)
@@ -30,3 +31,4 @@ class PlayerokClientConfig:
     handler_timeout: float | None = 30.0
     max_concurrent_handlers: int = 10
     state: StateStore | None = None
+    proxy: str | None = field(default=None, repr=False)

@@ -72,10 +72,13 @@ class GGselTransport:
         self._api_key = key
         self._seller_id = parsed_seller_id
         self._config = config or GGselConfig()
-        self._client = AsyncClient(
-            headers=self._config.headers,
-            timeout=self._config.request_timeout,
-        )
+        client_kwargs: dict[str, Any] = {
+            "headers": self._config.headers,
+            "timeout": self._config.request_timeout,
+        }
+        if self._config.proxy:
+            client_kwargs["proxy"] = self._config.proxy
+        self._client = AsyncClient(**client_kwargs)
         self._token: str | None = None
         self._token_valid_until = 0.0
         self._token_lock = asyncio.Lock()

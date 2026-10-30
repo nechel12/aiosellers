@@ -52,11 +52,14 @@ class PlayerokTransport:
                 "Please provide playerok access token or fill PLAYEROK_ACCESS_TOKEN environment variable."
             )
 
-        self._client = AsyncClient(
-            cookies={"token": self._access_token},
-            headers=self._config.headers,
-            timeout=self._config.request_timeout,
-        )
+        client_kwargs: dict[str, Any] = {
+            "cookies": {"token": self._access_token},
+            "headers": self._config.headers,
+            "timeout": self._config.request_timeout,
+        }
+        if self._config.proxy:
+            client_kwargs["proxy"] = self._config.proxy
+        self._client = AsyncClient(**client_kwargs)
         self._download_client: Any | None = None
         self._download_hosts = self._build_download_hosts(self._config.base_url)
 
@@ -98,10 +101,13 @@ class PlayerokTransport:
         if self._download_client is None:
             from tls_requests import AsyncClient  # type: ignore
 
-            self._download_client = AsyncClient(
-                headers={"user-agent": self._config.user_agent},
-                timeout=self._config.request_timeout,
-            )
+            client_kwargs: dict[str, Any] = {
+                "headers": {"user-agent": self._config.user_agent},
+                "timeout": self._config.request_timeout,
+            }
+            if self._config.proxy:
+                client_kwargs["proxy"] = self._config.proxy
+            self._download_client = AsyncClient(**client_kwargs)
         return self._download_client
 
     @staticmethod

@@ -111,6 +111,18 @@ export GGSEL_SELLER_ID="123456"
 Укажи `bot_mark=False` в `FunPayClientConfig`, чтобы не добавлять невидимую
 бот-метку в исходящие сообщения и отзывы.
 
+Все адаптеры принимают необязательный URL прокси:
+
+```python
+FunPay(FunPayClientConfig(golden_key="...", proxy="http://user:pass@proxy:8080"))
+Playerok(PlayerokClientConfig(access_token="...", proxy="http://proxy:8080"))
+GGsel(GGselClientConfig(api_key="...", seller_id=123456, proxy="http://proxy:8080"))
+```
+
+Playerok использует его для HTTP, загрузок, скачиваний и WebSocket-подписок;
+GGsel — для ApiLogin и всех запросов Seller API. Учётные данные прокси не
+попадают в `repr` конфигурации.
+
 ## Быстрый старт: PlayerOK
 
 ```python

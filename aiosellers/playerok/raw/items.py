@@ -108,7 +108,9 @@ class RawItemsService:
         file_handles = []
         try:
             for i, attachment in enumerate(attachments):
-                file_obj, should_close = await prepare_image_file(attachment)
+                file_obj, should_close = await prepare_image_file(
+                    attachment, proxy=self._transport.config.proxy
+                )
                 files[str(i + 1)] = file_obj
                 if should_close:
                     file_handles.append(file_obj)
@@ -160,7 +162,9 @@ class RawItemsService:
             files = {}
             try:
                 for i, attachment in enumerate(add_attachments):
-                    file_obj, should_close = await prepare_image_file(attachment)
+                    file_obj, should_close = await prepare_image_file(
+                        attachment, proxy=self._transport.config.proxy
+                    )
                     files[str(i + 1)] = file_obj
                     if should_close:
                         file_handles.append(file_obj)

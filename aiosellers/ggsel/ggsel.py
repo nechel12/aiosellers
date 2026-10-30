@@ -119,6 +119,7 @@ class GGsel:
                     request_timeout=self._config.request_timeout,
                     base_url=self._config.base_url,
                     locale=self._config.locale,
+                    proxy=self._config.proxy,
                 ),
             )
             try:

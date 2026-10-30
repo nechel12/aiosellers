@@ -112,6 +112,18 @@ also be passed directly: `Playerok("token")`, `FunPay("golden-key")` or
 Set `bot_mark=False` in `FunPayClientConfig` to stop adding the invisible bot
 marker to outgoing messages and reviews.
 
+All adapters accept an optional `proxy` URL:
+
+```python
+FunPay(FunPayClientConfig(golden_key="...", proxy="http://user:pass@proxy:8080"))
+Playerok(PlayerokClientConfig(access_token="...", proxy="http://proxy:8080"))
+GGsel(GGselClientConfig(api_key="...", seller_id=123456, proxy="http://proxy:8080"))
+```
+
+Playerok uses it for HTTP, uploads, downloads and WebSocket subscriptions; GGsel
+uses it for ApiLogin and every Seller API request. Proxy credentials are omitted
+from config `repr`.
+
 ## Quick Start: PlayerOK
 
 ```python

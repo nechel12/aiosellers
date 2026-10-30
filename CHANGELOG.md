@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.3.2] - 2026-10-30
+
+### Added
+
+- `proxy` support for GGsel and Playerok. GGsel routes ApiLogin and all Seller API
+  requests through the proxy; Playerok routes HTTP, uploads, downloads, remote
+  images and WebSocket subscriptions through it. Proxy credentials are hidden from
+  config `repr`.
+
+### Changed
+
+- The `websockets` dependency floor is now 15, the first release with WebSocket
+  proxy support. Without an explicit proxy, WebSocket connections keep honouring
+  the standard proxy environment variables.
+
 ## [0.3.1] - 2026-10-30
 
 ### Fixed

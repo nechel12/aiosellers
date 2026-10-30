@@ -112,10 +112,34 @@ class PlayerokLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(client._raw)
             self.assertIsNone(client.me_id)
 
-    def test_access_token_is_hidden_from_config_repr(self):
-        config = PlayerokClientConfig(access_token="secret-token")
+    async def test_start_passes_proxy_to_transport(self):
+        with (
+            mock.patch("aiosellers.playerok.playerok.PlayerokTransport") as transport_cls,
+            mock.patch("aiosellers.playerok.playerok.RawAPI") as raw_cls,
+        ):
+            transport = transport_cls.return_value
+            transport.close = mock.AsyncMock()
+            raw_cls.return_value.account.get_me = mock.AsyncMock(
+                return_value=SimpleNamespace(id="me-1")
+            )
+            proxy = "http://user:pass@proxy:8080"
+            client = Playerok(PlayerokClientConfig(access_token="token", proxy=proxy))
 
-        self.assertNotIn("secret-token", repr(config))
+            await client.start()
+
+            config = transport_cls.call_args.kwargs["config"]
+            self.assertEqual(config.proxy, proxy)
+
+    def test_access_token_and_proxy_are_hidden_from_config_repr(self):
+        config = PlayerokClientConfig(
+            access_token="secret-token",
+            proxy="http://user:pass@proxy:8080",
+        )
+
+        rendered = repr(config)
+        self.assertNotIn("secret-token", rendered)
+        self.assertNotIn("user:pass", rendered)
+        self.assertNotIn("proxy=", rendered)
 
     async def test_stop_cancels_polling_and_closes(self):
         client = _PollingClient().install(Playerok(PlayerokClientConfig(access_token="token")))

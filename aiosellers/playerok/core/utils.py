@@ -88,11 +88,14 @@ def _image_response_header(response: Any, name: str) -> Any:
     return headers.get(name) or headers.get(name.title())
 
 
-async def _download_remote_image(url: str) -> tuple[BytesIO, bool]:
+async def _download_remote_image(url: str, proxy: str | None = None) -> tuple[BytesIO, bool]:
     from tls_requests import AsyncClient
 
     current_url = await _validate_remote_image_url(url)
-    async with AsyncClient() as client:
+    client_kwargs: dict[str, Any] = {}
+    if proxy:
+        client_kwargs["proxy"] = proxy
+    async with AsyncClient(**client_kwargs) as client:
         for redirect_count in range(IMAGE_REDIRECT_LIMIT + 1):
             response = await client.get(current_url, follow_redirects=False)
             status = getattr(response, "status_code", 200)
@@ -131,7 +134,7 @@ async def _download_remote_image(url: str) -> tuple[BytesIO, bool]:
     raise AssertionError("unreachable")
 
 
-async def prepare_image_file(image: ImageInput) -> tuple[Any, bool]:
+async def prepare_image_file(image: ImageInput, *, proxy: str | None = None) -> tuple[Any, bool]:
     if isinstance(image, BytesIO):
         return image, False
 
@@ -147,7 +150,7 @@ async def prepare_image_file(image: ImageInput) -> tuple[Any, bool]:
         if not is_windows_path and "://" in image:
             if parsed.scheme.lower() not in ("http", "https"):
                 raise ValueError(f"Unsupported image URL scheme: {parsed.scheme}")
-            return await _download_remote_image(image)
+            return await _download_remote_image(image, proxy=proxy)
 
         file_obj = open(image, "rb")
         return file_obj, True

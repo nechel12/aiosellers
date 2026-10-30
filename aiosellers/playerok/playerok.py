@@ -123,6 +123,7 @@ class Playerok:
                     user_agent=self._config.user_agent,
                     request_timeout=self._config.request_timeout,
                     base_url=self._config.base_url,
+                    proxy=self._config.proxy,
                 ),
             )
             raw = RawAPI(transport)

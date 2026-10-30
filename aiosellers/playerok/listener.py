@@ -517,11 +517,14 @@ class EventListener:
         while not self._stop.is_set():
             connected = False
             try:
+                transport = self.client._transport
+                proxy = transport.config.proxy if transport is not None else None
                 connect = websockets.connect(
                     _WS_URL,
                     subprotocols=[cast(Any, "graphql-transport-ws")],
                     additional_headers=self._headers(),
                     origin=cast(Any, "https://playerok.com"),
+                    proxy=proxy or True,
                 )
                 async with connect as ws:
                     self._ws = ws

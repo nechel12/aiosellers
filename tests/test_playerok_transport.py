@@ -60,6 +60,7 @@ class TransportTestBase(unittest.IsolatedAsyncioTestCase):
         download_responses=None,
         *,
         base_url="https://playerok.com/",
+        proxy=None,
     ):
         self.session = _FakeClient(session_responses)
         self.download = _FakeClient(download_responses)
@@ -74,7 +75,7 @@ class TransportTestBase(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(patcher.stop)
         transport = PlayerokTransport(
             access_token="token",
-            config=PlayerokConfig(base_url=base_url),
+            config=PlayerokConfig(base_url=base_url, proxy=proxy),
         )
         return transport
 
@@ -164,6 +165,19 @@ class RawRequestRetryTests(TransportTestBase):
         with self.assertRaises(RequestFailedError):
             await RawItemsService(mutation_transport).remove_item("i1")
         self.assertEqual(len(self.session.calls), 1)
+
+
+class ProxyTests(TransportTestBase):
+    async def test_proxy_is_shared_by_http_and_download_clients(self):
+        proxy = "http://user:pass@proxy:8080"
+        transport = self.make_transport(
+            download_responses=[_Response(200, content=b"img")],
+            proxy=proxy,
+        )
+
+        await transport.download("https://playerok.com/pic.png")
+
+        self.assertEqual([created["proxy"] for created in self.created], [proxy, proxy])
 
 
 class DownloadTests(TransportTestBase):

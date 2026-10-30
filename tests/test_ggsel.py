@@ -388,11 +388,28 @@ class _LifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake.calls[0][0], "post")
         await client.close()
 
-    async def test_config_repr_hides_the_api_key(self):
-        config = GGselClientConfig(api_key="very-secret", seller_id=42)
+    async def test_start_passes_proxy_to_http_client(self):
+        _FakeTLSClient.responses = [_login_ok()]
+        proxy = "http://user:pass@proxy:8080"
+        client = GGsel(GGselClientConfig(api_key="secret", seller_id=42, proxy=proxy))
 
-        self.assertNotIn("very-secret", repr(config))
-        self.assertIn("seller_id=42", repr(config))
+        await client.start()
+
+        self.assertEqual(_FakeTLSClient.last.kwargs["proxy"], proxy)
+        await client.close()
+
+    async def test_config_repr_hides_the_api_key_and_proxy(self):
+        config = GGselClientConfig(
+            api_key="very-secret",
+            seller_id=42,
+            proxy="http://user:pass@proxy:8080",
+        )
+
+        rendered = repr(config)
+        self.assertNotIn("very-secret", rendered)
+        self.assertNotIn("user:pass", rendered)
+        self.assertNotIn("proxy=", rendered)
+        self.assertIn("seller_id=42", rendered)
 
 
 class _FakeChatService:
