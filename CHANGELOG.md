@@ -8,7 +8,7 @@ All notable changes to this project are documented in this file.
 
 - Minimum `lxml` is now 6.0.2 and minimum `websockets` is now 16. These are the
   first releases with Python 3.14 support, including cp314 wheels. The test suite
-  passes with these minimums and with the latest lxml 6.1.3 and websockets 17.3 on
+  passes with these minimums and with the latest lxml 6.1.3 and websockets 17.4 on
   Python 3.12 and 3.14.
 - Release tags are signed with a dedicated SSH signing key.
 
