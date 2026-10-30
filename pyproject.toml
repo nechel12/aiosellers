@@ -1,6 +1,6 @@
 [project]
 name = "aiosellers"
-version = "0.1.10"
+version = "0.2.0"
 description = "All In One Sellers API - Universal async API for digital trading platforms (FunPay, PlayerOK, GGsel). Fork of Zewsic/aiosellers with a shared hub and a GGsel adapter."
 readme = "README.md"
 requires-python = ">=3.12"
