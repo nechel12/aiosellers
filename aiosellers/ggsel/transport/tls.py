@@ -95,7 +95,10 @@ class GGselTransport:
                 return self._token
 
             timestamp = str(int(time.time()))
-            sign = hashlib.sha256((self._api_key + timestamp).encode()).hexdigest()
+            # GGsel mandates SHA-256 for ApiLogin signatures; no passwords are hashed here.
+            sign = hashlib.sha256(  # codeql[py/weak-sensitive-data-hashing]
+                (self._api_key + timestamp).encode()
+            ).hexdigest()
             data = await self._request_with_retries(
                 "post",
                 LOGIN_PATH,
