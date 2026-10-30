@@ -35,6 +35,9 @@ export PLAYEROK_ACCESS_TOKEN="your_token_here"
 export FUNPAY_GOLDEN_KEY="your_golden_key"
 ```
 
+Set `bot_mark=False` in `FunPayClientConfig` to stop adding the invisible bot marker
+to outgoing messages and reviews.
+
 ---
 
 ## Quick Start: PlayerOK
@@ -70,6 +73,75 @@ async def main():
 
 asyncio.run(main())
 ```
+
+## Multi-account hub
+
+`SellerHub` runs several FunPay and Playerok sessions together and merges their events
+into one stream. Every item carries the platform and session id, while the payload stays
+the original typed event.
+
+```python
+import asyncio
+
+from aiosellers import FunPay, Platform, Playerok, SellerHub
+
+async def main():
+    hub = SellerHub()
+    hub.add(FunPay("your-golden-key"), platform=Platform.FUNPAY, session_id="funpay-main")
+    hub.add(
+        Playerok("your-access-token"),
+        platform=Platform.PLAYEROK,
+        session_id="playerok-main",
+        listen_options={"reviews": True},
+    )
+
+    await hub.start()
+    try:
+        async for item in hub.stream():
+            print(item.platform, item.session_id, item.kind, item.event)
+    finally:
+        await hub.close()
+
+asyncio.run(main())
+```
+
+`item.kind` is a portable `EventKind` (`MESSAGE`, `REVIEW`, `ORDER`, `DEAL`, ...).
+`Session.capabilities` tells what a platform supports, so shared code can branch without
+hardcoding platform names. Clients also expose `stop()` to end `start_polling()` from
+another task.
+
+## Durable listener state
+
+Pass a `StateStore` in the client config to keep chat cursors, processed message ids and
+order snapshots across process restarts. Without a store, listeners rebuild their state on
+every launch and emit only the initial snapshots.
+
+```python
+import asyncio
+
+from aiosellers import (
+    FunPay,
+    FunPayClientConfig,
+    Playerok,
+    PlayerokClientConfig,
+    SQLiteStateStore,
+)
+
+async def main():
+    store = SQLiteStateStore("sellers.db")
+    funpay = FunPay(FunPayClientConfig(golden_key="...", state=store))
+    playerok = Playerok(PlayerokClientConfig(access_token="...", state=store))
+
+    # ... run the clients ...
+
+    await store.close()
+
+asyncio.run(main())
+```
+
+`MemoryStateStore` keeps the same semantics in process memory, which is handy for tests.
+State keys are `funpay:{account_id}:listener` and `playerok:{user_id}:listener`; a
+malformed snapshot is ignored with a warning, and a failed write never stops polling.
 
 ---
 

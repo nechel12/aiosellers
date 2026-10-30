@@ -4,15 +4,36 @@ version = "0.1.10"
 description = "All In One Sellers API - Universal API for various digital trading platforms (such as PlayerOK or FunPay). Provides developers with a convenient way to create bots on any platform."
 readme = "README.md"
 requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [
+    { name = "Daniil Nikishin", email = "danilanicishin@gmail.com" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: AsyncIO",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Typing :: Typed",
+]
 dependencies = [
     "beautifulsoup4>=4.12",
     "idna>=3.11",
     "lxml>=5",
     "pydantic>=2.12.5",
-    "python-dotenv>=1.2.1",
-    "ruff>=0.14.10",
     "websockets>=14",
     "wrapper-tls-requests>=1.1.9",
+]
+
+[project.urls]
+Homepage = "https://github.com/Zewsic/aiosellers"
+Repository = "https://github.com/Zewsic/aiosellers"
+Issues = "https://github.com/Zewsic/aiosellers/issues"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.14.10",
 ]
 
 [build-system]
