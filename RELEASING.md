@@ -28,8 +28,8 @@ On Windows, use a temporary directory and the `Scripts\python.exe` /
 
 3. **Publish on GitHub**
    - Commit and push `main`; wait for CI.
-   - Create an annotated tag: `git tag -a vX.Y.Z -m "vX.Y.Z"`, then
-     `git push origin vX.Y.Z`.
+   - Create a signed annotated tag (see [Signed tags](#signed-tags)):
+     `git tag -s vX.Y.Z -m "vX.Y.Z"`, then `git push origin vX.Y.Z`.
    - Create a GitHub release with the changelog notes.
 
 4. **PyPI**
@@ -47,6 +47,31 @@ On Windows, use a temporary directory and the `Scripts\python.exe` /
 5. **Rollback**
    - Reinstall the previous tag (for example, the tag before the current one)
      or the previous PyPI release. Tags make rollback deterministic.
+
+## Signed tags
+
+Release tags from `v0.3.3` are signed with the SSH key published in
+`docs/release-signing-key.pub` (fingerprint
+`SHA256:9nn6n/ESaUSqHp5rXqGsQ8JC/xzmLpacaAppN2etg/E`). The private key is kept
+outside the repository and is never used for repository access.
+
+Create a signed tag without changing the repository configuration:
+
+```sh
+git -c gpg.format=ssh -c user.signingkey="$HOME/.ssh/aiosellers-release" \
+  tag -s vX.Y.Z -m "vX.Y.Z"
+```
+
+Verify it locally:
+
+```sh
+printf '%s %s\n' "da_ladno123@list.ru" "$(cat docs/release-signing-key.pub)" \
+  > /tmp/allowed_signers
+git -c gpg.ssh.allowedSignersFile=/tmp/allowed_signers tag -v vX.Y.Z
+```
+
+GitHub marks the tag as Verified after the public key is added under
+**Settings → SSH and GPG keys → New SSH key → Signing Key**.
 
 ## PyPI name
 

@@ -1,6 +1,6 @@
 [project]
 name = "aiosellers-nechel12"
-version = "0.3.2"
+version = "0.3.3"
 description = "All In One Sellers API - Universal async API for digital trading platforms (FunPay, PlayerOK, GGsel). Fork of Zewsic/aiosellers with a shared hub and a GGsel adapter."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -40,10 +40,11 @@ dependencies = [
     # Not imported directly; kept as a dependency floor for the TLS stack.
     # 3.15 fixes PYSEC-2026-215.
     "idna>=3.15",
-    "lxml>=5",
+    # lxml 6.0.2 is the first release with Python 3.14 wheels.
+    "lxml>=6.0.2",
     "pydantic>=2.12.5",
-    # WebSocket proxy support was added in websockets 15.
-    "websockets>=15",
+    # Proxy support arrived in 15; 16 is the first release officially supporting Python 3.14.
+    "websockets>=16",
     "wrapper-tls-requests>=1.1.9",
 ]
 
