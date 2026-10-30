@@ -105,8 +105,8 @@ export GGSEL_API_KEY="your_api_key"
 export GGSEL_SELLER_ID="123456"
 ```
 
-`Playerok()`, `FunPay()` and `GGsel()` read these variables. You can also pass
-credentials directly: `Playerok("token")`, `FunPay("golden-key")` or
+`Playerok()`, `FunPay()` and `GGsel()` read these variables. Credentials can
+also be passed directly: `Playerok("token")`, `FunPay("golden-key")` or
 `GGsel(GGselClientConfig(api_key="key", seller_id=123456))`.
 
 Set `bot_mark=False` in `FunPayClientConfig` to stop adding the invisible bot
@@ -199,15 +199,15 @@ from aiosellers import (
 
 async def main():
     hub = SellerHub()
-    hub.add(FunPay("your-golden-key"), platform=Platform.FUNPAY, session_id="funpay-main")
+    hub.add(FunPay("golden-key"), platform=Platform.FUNPAY, session_id="funpay-main")
     hub.add(
-        Playerok("your-access-token"),
+        Playerok("access-token"),
         platform=Platform.PLAYEROK,
         session_id="playerok-main",
         listen_options={"reviews": True},
     )
     hub.add(
-        GGsel(GGselClientConfig(api_key="your-api-key", seller_id=123456)),
+        GGsel(GGselClientConfig(api_key="api-key", seller_id=123456)),
         platform=Platform.GGSEL,
         session_id="ggsel-main",
     )
@@ -346,8 +346,8 @@ processing, messaging, reviews and price updates.
   use. Platform changes can break them, so pin a version and watch the
   [CHANGELOG](CHANGELOG.md).
 - GGsel is implemented against Seller API V1 only.
-- The library is a client, not a scheduler: you run the event loop and decide
-  how to deploy, scale and supervise your bots.
+- The library is a client, not a scheduler: the application runs the event loop
+  and decides how to deploy, scale and supervise bots.
 - Platform rules, rate limits and account bans are outside the library's
   control. Use the APIs responsibly and at your own risk.
 
@@ -355,7 +355,7 @@ processing, messaging, reviews and price updates.
 
 See [SECURITY.md](SECURITY.md) for vulnerability reporting. The library stores
 tokens in memory, passes them only to the platform endpoints, and keeps
-listener state in the `StateStore` you provide. Do not log credentials, and
+listener state in the provided `StateStore`. Do not log credentials, and
 protect the SQLite state file if it contains chat metadata.
 
 Report vulnerabilities through GitHub's private advisory flow, not a public
@@ -412,8 +412,8 @@ maintained by the upstream project and is not affiliated with this fork.
 
 ## Support the project
 
-All-In-One Sellers API is free and open source. If it saves you time, you can
-support further development:
+All-In-One Sellers API is free and open source. If the project saves time,
+support is welcome:
 
 <p align="center">
   <a href="https://boosty.to/nechel12/donate">
