@@ -1,0 +1,83 @@
+name: Bug report
+description: Report a reproducible bug
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please remove API keys, golden keys, access
+        tokens, buyer personal data, and chat contents before posting.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Release tag, commit SHA, or output of `pip show aiosellers`.
+      placeholder: "e.g. v0.2.0 or abc1234"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - FunPay
+        - PlayerOK
+        - GGsel
+        - Core / SellerHub
+        - StateStore
+        - Documentation / examples
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      description: Output of `python --version`.
+      placeholder: "e.g. 3.12.7"
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened
+      description: Include the traceback, the call you made, and what you expected.
+      placeholder: |
+        await client.chats.list() raised ..., expected ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Minimal code or steps. Use fake credentials.
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or context
+      description: Relevant logs without secrets, tokens, or personal data.
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I removed API keys, tokens, and personal data.
+          required: true
+        - label: I checked the README and existing issues.
+          required: true

@@ -6,12 +6,22 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- `aiosellers.ggsel`: a GGsel seller adapter built on the official Seller API V1
+  (signed ApiLogin flow, token refresh, GET retries and 429 handling). It covers
+  balance and receipts, categories, products and price updates, sales and purchases,
+  chats, reviews, and a polling event listener with durable state.
+- `Platform.GGSEL` in the shared core, with its capability set and `EventKind` mapping,
+  so `SellerHub` can merge GGsel sessions with FunPay and Playerok.
 - `aiosellers.core`: `Platform`, capability matrix, `EventKind`/`HubEvent` and `SellerHub`
   for running several sessions with one merged event stream.
 - `stop()` on both clients to end `start_polling()` from another task.
 - `max_concurrent_requests` for FunPay instead of one global request lock.
 - `py.typed` marker, package metadata and a dev dependency group.
 - CI workflow running lint and tests.
+- Bilingual documentation: `README.md` and `README.ru.md` with a fork notice,
+  badges and installation from GitHub, plus `SECURITY.md`, `CONTRIBUTING.md`,
+  `CODE_OF_CONDUCT.md` and `RELEASING.md`.
+- GitHub issue and pull request templates and Dependabot for uv and Actions.
 - `StateStore` protocol with `MemoryStateStore` and `SQLiteStateStore`; both listeners
   persist cursors and dedup windows and recover them after a restart.
 - Bounded `sent_history_limit` (FunPay) and `processed_history_limit` (Playerok) windows.

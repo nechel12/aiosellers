@@ -1,13 +1,17 @@
 [project]
 name = "aiosellers"
 version = "0.1.10"
-description = "All In One Sellers API - Universal API for various digital trading platforms (such as PlayerOK or FunPay). Provides developers with a convenient way to create bots on any platform."
+description = "All In One Sellers API - Universal async API for digital trading platforms (FunPay, PlayerOK, GGsel). Fork of Zewsic/aiosellers with a shared hub and a GGsel adapter."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [
     { name = "Daniil Nikishin", email = "danilanicishin@gmail.com" },
 ]
+maintainers = [
+    { name = "nechel12", url = "https://github.com/nechel12" },
+]
+keywords = ["funpay", "playerok", "ggsel", "marketplace", "asyncio", "api-wrapper", "bots"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Framework :: AsyncIO",
@@ -26,9 +30,11 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Zewsic/aiosellers"
-Repository = "https://github.com/Zewsic/aiosellers"
-Issues = "https://github.com/Zewsic/aiosellers/issues"
+Homepage = "https://github.com/nechel12/aiosellers"
+Repository = "https://github.com/nechel12/aiosellers"
+Issues = "https://github.com/nechel12/aiosellers/issues"
+Changelog = "https://github.com/nechel12/aiosellers/blob/main/CHANGELOG.md"
+Upstream = "https://github.com/Zewsic/aiosellers"
 
 [dependency-groups]
 dev = [
