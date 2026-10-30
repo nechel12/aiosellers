@@ -109,7 +109,9 @@ class SellerHub:
         for session, result in zip(self._sessions.values(), results):
             if isinstance(result, BaseException):
                 logger.warning(
-                    "Failed to close %s session %s", session.platform.value, session.id,
+                    "Failed to close %s session %s",
+                    session.platform.value,
+                    session.id,
                     exc_info=result,
                 )
 
@@ -134,6 +136,7 @@ class SellerHub:
         )
 
         async def pump(session: Session) -> None:
+            cancelled = False
             try:
                 async for event in session.client.listen(**session.listen_options):
                     await queue.put(
@@ -145,13 +148,17 @@ class SellerHub:
                         )
                     )
             except asyncio.CancelledError:
+                cancelled = True
                 raise
             except Exception:
                 logger.exception(
                     "Listener of %s session %s stopped", session.platform.value, session.id
                 )
             finally:
-                await queue.put((session.id, None))
+                # A cancelled pump may be blocked on a full queue: the consumer
+                # has already stopped, so a sentinel would never be consumed.
+                if not cancelled:
+                    await queue.put((session.id, None))
 
         tasks = [asyncio.create_task(pump(session)) for session in self._sessions.values()]
         pending = len(tasks)

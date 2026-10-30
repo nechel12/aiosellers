@@ -51,13 +51,12 @@ class SQLiteStateStore:
     """
 
     def __init__(self, path: str | Path) -> None:
-        self.path = str(path)
+        raw_path = str(path)
+        self.path = raw_path if raw_path == ":memory:" else str(Path(raw_path).expanduser())
         if self.path != ":memory:":
-            Path(self.path).expanduser().parent.mkdir(parents=True, exist_ok=True)
+            Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self._lock = asyncio.Lock()
-        self._conn: sqlite3.Connection | None = sqlite3.connect(
-            self.path, check_same_thread=False
-        )
+        self._conn: sqlite3.Connection | None = sqlite3.connect(self.path, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute(
             "CREATE TABLE IF NOT EXISTS state ("
@@ -86,9 +85,7 @@ class SQLiteStateStore:
                 await asyncio.to_thread(conn.close)
 
     def _read(self, key: str) -> str | None:
-        row = self._connection().execute(
-            "SELECT value FROM state WHERE key = ?", (key,)
-        ).fetchone()
+        row = self._connection().execute("SELECT value FROM state WHERE key = ?", (key,)).fetchone()
         return None if row is None else row[0]
 
     def _write(self, key: str, payload: str) -> None:

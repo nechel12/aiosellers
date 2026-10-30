@@ -1,7 +1,9 @@
 import asyncio
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from aiosellers import MemoryStateStore, SQLiteStateStore, StateStore
 
@@ -13,9 +15,7 @@ class MemoryStateStoreTests(unittest.IsolatedAsyncioTestCase):
         await store.set("key", value)
         value["cursors"].append(3)
 
-        self.assertEqual(
-            await store.get("key"), {"cursors": [1, 2], "nested": {"ok": True}}
-        )
+        self.assertEqual(await store.get("key"), {"cursors": [1, 2], "nested": {"ok": True}})
 
         await store.set("key", {"other": 1})
         self.assertEqual(await store.get("key"), {"other": 1})
@@ -43,9 +43,7 @@ class SQLiteStateStoreTests(unittest.IsolatedAsyncioTestCase):
             await store.close()
 
             reopened = SQLiteStateStore(path)
-            self.assertEqual(
-                await reopened.get("key"), {"version": 1, "ids": ["a"]}
-            )
+            self.assertEqual(await reopened.get("key"), {"version": 1, "ids": ["a"]})
 
             await reopened.set("key", {"version": 2})
             self.assertEqual(await reopened.get("key"), {"version": 2})
@@ -62,12 +60,19 @@ class SQLiteStateStoreTests(unittest.IsolatedAsyncioTestCase):
             await store.close()
             self.assertTrue(path.exists())
 
+    async def test_expands_home_directory_in_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.dict(os.environ, {"HOME": tmp, "USERPROFILE": tmp}):
+                store = SQLiteStateStore("~/aiosellers-state.db")
+                await store.set("key", "value")
+                await store.close()
+
+            self.assertTrue((Path(tmp) / "aiosellers-state.db").exists())
+
     async def test_concurrent_access(self):
         store = SQLiteStateStore(":memory:")
         await asyncio.gather(*(store.set(f"key-{index}", index) for index in range(50)))
-        values = await asyncio.gather(
-            *(store.get(f"key-{index}") for index in range(50))
-        )
+        values = await asyncio.gather(*(store.get(f"key-{index}") for index in range(50)))
         self.assertEqual(values, list(range(50)))
         await store.close()
 

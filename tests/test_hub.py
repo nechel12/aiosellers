@@ -90,12 +90,8 @@ class CapabilityTests(unittest.TestCase):
         self.assertIs(
             event_kind(Platform.PLAYEROK, _event(PlayerokEvents.NEW_REVIEW)), EventKind.REVIEW
         )
-        self.assertIs(
-            event_kind(Platform.GGSEL, _event(GGselEvents.NEW_SALE)), EventKind.ORDER
-        )
-        self.assertIs(
-            event_kind(Platform.GGSEL, _event(GGselEvents.NEW_REVIEW)), EventKind.REVIEW
-        )
+        self.assertIs(event_kind(Platform.GGSEL, _event(GGselEvents.NEW_SALE)), EventKind.ORDER)
+        self.assertIs(event_kind(Platform.GGSEL, _event(GGselEvents.NEW_REVIEW)), EventKind.REVIEW)
         self.assertIs(
             event_kind(Platform.GGSEL, _event(GGselEvents.INITIAL_CHAT)), EventKind.INITIAL
         )
@@ -109,9 +105,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
     def test_both_clients_satisfy_the_protocol(self):
         self.assertIsInstance(FunPay(FunPayClientConfig(golden_key="key")), SellerClient)
         self.assertIsInstance(Playerok(PlayerokClientConfig(access_token="token")), SellerClient)
-        self.assertIsInstance(
-            GGsel(GGselClientConfig(api_key="key", seller_id=42)), SellerClient
-        )
+        self.assertIsInstance(GGsel(GGselClientConfig(api_key="key", seller_id=42)), SellerClient)
 
     def test_session_ids_and_duplicates(self):
         hub = SellerHub()
@@ -192,6 +186,30 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0)
 
         self.assertTrue(client.listen_cancelled)
+
+    async def test_leaving_stream_with_full_buffer_does_not_deadlock(self):
+        class FloodClient:
+            async def start(self):
+                pass
+
+            async def close(self):
+                pass
+
+            async def listen(self, **options):
+                index = 0
+                while True:
+                    index += 1
+                    yield index
+
+        hub = SellerHub(stream_buffer=1)
+        hub.add(FloodClient(), platform="funpay", session_id="flood")
+        await hub.start()
+
+        stream = hub.stream()
+        await anext(stream)
+        await asyncio.sleep(0.05)
+        await asyncio.wait_for(stream.aclose(), timeout=1)
+        await hub.close()
 
     async def test_stream_requires_sessions(self):
         with self.assertRaises(RuntimeError):
