@@ -60,7 +60,7 @@ backend in the request path.
 
 ## Installation
 
-Install the fork from GitHub (works today):
+Install the fork from GitHub:
 
 ```bash
 pip install "git+https://github.com/nechel12/aiosellers.git"

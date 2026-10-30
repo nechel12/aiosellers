@@ -99,7 +99,8 @@ reconnects with backoff and reconciles missed chats after a reconnect.
 from aiosellers.ggsel import GGsel, GGselClientConfig
 ```
 
-- `GGsel(api_key)` or `GGsel(GGselClientConfig(api_key=..., seller_id=...))`.
+- `GGsel(api_key)` when `GGSEL_SELLER_ID` is set, or
+  `GGsel(GGselClientConfig(api_key=..., seller_id=...))`.
 - `client.account` — balance and receipts.
 - `client.categories` — seller categories.
 - `client.chats` — chats and message history.
