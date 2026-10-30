@@ -11,6 +11,28 @@
 [![CodeQL](https://github.com/nechel12/aiosellers/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/nechel12/aiosellers/security/code-scanning)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](CONTRIBUTING.md)
 
+## Contents
+
+- [Installation](#installation)
+- [Documentation](#documentation)
+- [Configuration](#configuration)
+- [Quick Start: PlayerOK](#quick-start-playerok)
+- [Quick Start: FunPay](#quick-start-funpay)
+- [Quick Start: GGsel](#quick-start-ggsel)
+- [Multi-account hub](#multi-account-hub)
+- [Durable listener state](#durable-listener-state)
+- [Examples](#examples)
+- [Development Status: PlayerOK](#development-status-playerok)
+- [Development Status: FunPay](#development-status-funpay)
+- [Development Status: GGsel](#development-status-ggsel)
+- [Limitations](#limitations)
+- [Security](#security)
+- [Development](#development)
+- [Related projects](#related-projects)
+- [Contributing](#contributing)
+- [License](#license)
+- [Support the project](#support-the-project)
+
 Asynchronous Python wrapper for digital trading platforms: **FunPay**, **PlayerOK**
 and **GGsel**. One package, one event model, one multi-account hub.
 
@@ -63,6 +85,12 @@ pip install "git+https://github.com/nechel12/aiosellers.git@<tag>"
 ```
 
 **Requirements:** Python 3.12+.
+
+## Documentation
+
+- [API overview](docs/API.md) — public entry points and modules.
+- [Migration from upstream](docs/MIGRATION.md) — install name, changed behavior
+  and upgrade steps.
 
 ## Configuration
 
