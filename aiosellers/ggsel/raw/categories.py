@@ -20,7 +20,5 @@ class RawCategoryService:
         params: dict[str, Any] = {"page": page, "count": count}
         if category_id is not None:
             params["category_id"] = category_id
-        data = await self._transport.request(
-            "get", "/api_sellers/api/categories", params=params
-        )
+        data = await self._transport.request("get", "/api_sellers/api/categories", params=params)
         return CategoriesResponse.model_validate(data if isinstance(data, dict) else {})

@@ -28,9 +28,7 @@ class RawSaleService:
         return LastSalesResponse.model_validate(data if isinstance(data, dict) else {})
 
     async def purchase(self, invoice_id: int | str) -> PurchaseInfoResponse:
-        data = await self._transport.request(
-            "get", f"/api_sellers/api/purchase/info/{invoice_id}"
-        )
+        data = await self._transport.request("get", f"/api_sellers/api/purchase/info/{invoice_id}")
         return PurchaseInfoResponse.model_validate(data if isinstance(data, dict) else {})
 
     async def purchase_by_unique_code(self, unique_code: str) -> UniqueCodeResponse:

@@ -56,16 +56,10 @@ class RawChatService:
         if count is not None:
             params["count"] = min(100, max(1, count))
 
-        data = await self._transport.request(
-            "get", "/api_sellers/api/debates/v2", params=params
-        )
+        data = await self._transport.request("get", "/api_sellers/api/debates/v2", params=params)
         if not isinstance(data, list):
             raise RequestFailedError("GGsel returned an unexpected chat history payload")
-        return [
-            ChatMessageSchema.model_validate(row)
-            for row in data
-            if isinstance(row, dict)
-        ]
+        return [ChatMessageSchema.model_validate(row) for row in data if isinstance(row, dict)]
 
     async def send_message(self, chat_id: int | str, message: str) -> SendMessageResponse:
         data = await self._transport.request(

@@ -77,9 +77,7 @@ class SaleAPI:
         return purchase
 
     async def get_by_unique_code(self, unique_code: str) -> Purchase:
-        response = await self._client._require_raw().sales.purchase_by_unique_code(
-            unique_code
-        )
+        response = await self._client._require_raw().sales.purchase_by_unique_code(unique_code)
         purchase = self._purchase_by_code(response)
         purchase._client = self._client
         return purchase

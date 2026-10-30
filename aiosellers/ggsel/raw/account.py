@@ -11,9 +11,7 @@ class RawAccountService:
         self._transport = transport
 
     async def balance(self) -> BalanceResponse:
-        data = await self._transport.request(
-            "get", "/api_sellers/api/sellers/account/balance/info"
-        )
+        data = await self._transport.request("get", "/api_sellers/api/sellers/account/balance/info")
         return BalanceResponse.model_validate(data if isinstance(data, dict) else {})
 
     async def receipts(

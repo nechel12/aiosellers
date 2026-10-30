@@ -34,9 +34,7 @@ class RawProductService:
         return ProductListResponse.model_validate(data if isinstance(data, dict) else {})
 
     async def get_product(self, product_id: int | str) -> ProductDataResponse:
-        data = await self._transport.request(
-            "get", f"/api_sellers/api/products/{product_id}/data"
-        )
+        data = await self._transport.request("get", f"/api_sellers/api/products/{product_id}/data")
         return ProductDataResponse.model_validate(data if isinstance(data, dict) else {})
 
     async def seller_goods(

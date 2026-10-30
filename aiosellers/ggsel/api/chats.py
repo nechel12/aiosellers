@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 from typing import TYPE_CHECKING, AsyncIterator
 
 from ..entities.chat import Chat, ChatMessage
@@ -36,9 +37,9 @@ class ChatAPI:
         page_size: int | None = None,
         only_new: bool = False,
         email: str | None = None,
-        product_ids: list[int] | None = None,
-    ) -> list[Chat]:
-        result: list[Chat] = []
+        product_ids: builtins.list[int] | None = None,
+    ) -> builtins.list[Chat]:
+        result: builtins.list[Chat] = []
         current_page = max(1, page)
         batch_size = max(1, min(100, page_size or limit or 50))
 
@@ -68,7 +69,7 @@ class ChatAPI:
         page_size: int = 50,
         only_new: bool = False,
         email: str | None = None,
-        product_ids: list[int] | None = None,
+        product_ids: builtins.list[int] | None = None,
     ) -> AsyncIterator[Chat]:
         current_page = 1
         while True:
@@ -102,7 +103,7 @@ class ChatAPI:
         from_id: int | None = None,
         to_id: int | None = None,
         newer: bool | None = None,
-    ) -> list[ChatMessage]:
+    ) -> builtins.list[ChatMessage]:
         count = min(100, max(1, limit))
         rows = await self._client._require_raw().chats.history(
             chat_id,

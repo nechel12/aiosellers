@@ -168,7 +168,11 @@ class GGselTransport:
         retry: bool | None,
     ) -> Any:
         attempts = REQUEST_ATTEMPTS if (retry if retry is not None else method == "get") else 1
-        url = path if path.startswith("http") else self._config.base_url + path.lstrip("/")
+        url = (
+            path
+            if path.startswith("http")
+            else self._config.base_url.rstrip("/") + "/" + path.lstrip("/")
+        )
         last_error: Exception | None = None
 
         for attempt in range(attempts):
@@ -202,9 +206,7 @@ class GGselTransport:
                 await asyncio.sleep(_backoff(attempt, retry_after))
                 continue
             if status >= 500 and attempt + 1 < attempts:
-                last_error = RequestFailedError(
-                    f"GGsel request failed: HTTP {status} ({path})"
-                )
+                last_error = RequestFailedError(f"GGsel request failed: HTTP {status} ({path})")
                 await asyncio.sleep(_backoff(attempt, retry_after))
                 continue
             raise RequestFailedError(f"GGsel request failed: HTTP {status} ({path})")
@@ -223,9 +225,7 @@ class GGselTransport:
             headers["Content-Type"] = "application/json"
         if method == "get":
             return await self._client.get(url=url, headers=headers, params=params)
-        return await self._client.post(
-            url=url, headers=headers, params=params, json=json_body
-        )
+        return await self._client.post(url=url, headers=headers, params=params, json=json_body)
 
     @staticmethod
     def _decode(response: Any) -> Any:

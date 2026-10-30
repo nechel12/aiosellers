@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 from typing import TYPE_CHECKING
 
 from ..entities.category import Category
@@ -18,8 +19,8 @@ class CategoryAPI:
         limit: int = 100,
         page: int = 1,
         category_id: int | None = None,
-    ) -> list[Category]:
-        result: list[Category] = []
+    ) -> builtins.list[Category]:
+        result: builtins.list[Category] = []
         current_page = max(1, page)
         while len(result) < limit:
             want = min(100, limit - len(result))

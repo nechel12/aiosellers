@@ -183,9 +183,7 @@ class EventListener:
                 if row.seller and not self.include_own:
                     continue
                 message = self.client.chats._to_message(row, item.id_i)
-                events.append(
-                    NewMessageEvent(client=self.client, chat=chat, message=message)
-                )
+                events.append(NewMessageEvent(client=self.client, chat=chat, message=message))
             last_id = max((row.id for row in rows), default=known.last_id)
             if last_id > known.last_id:
                 known.last_id = last_id
@@ -197,9 +195,7 @@ class EventListener:
             self._mark_state_dirty()
         return events
 
-    async def _new_chat_state(
-        self, item: ChatItem, chat: Chat
-    ) -> tuple[_ChatState, list[Any]]:
+    async def _new_chat_state(self, item: ChatItem, chat: Chat) -> tuple[_ChatState, list[Any]]:
         if not self._recent(item.last_message):
             return await self._baseline_chat(item), []
 
@@ -314,8 +310,7 @@ class EventListener:
         self._mark_state_dirty()
         fresh.sort(key=lambda row: (row.date.timestamp() if row.date else 0.0, row.invoice_id))
         return [
-            NewSaleEvent(client=self.client, sale=self.client.sales._to_sale(row))
-            for row in fresh
+            NewSaleEvent(client=self.client, sale=self.client.sales._to_sale(row)) for row in fresh
         ]
 
     async def _review_events(self) -> list[Any]:
@@ -335,9 +330,9 @@ class EventListener:
         if not fresh:
             return []
         seen = set(ids)
-        self._reviews = (
-            ids + [review_id for review_id in self._reviews if review_id not in seen]
-        )[: self.state_limit]
+        self._reviews = (ids + [review_id for review_id in self._reviews if review_id not in seen])[
+            : self.state_limit
+        ]
         self._mark_state_dirty()
         fresh.sort(key=lambda row: row.id)
         return [

@@ -21,7 +21,5 @@ class RawReviewService:
         params: dict[str, Any] = {"type": review_type, "page": page, "count": count}
         if product_id is not None:
             params["product_id"] = product_id
-        data = await self._transport.request(
-            "get", "/api_sellers/api/reviews", params=params
-        )
+        data = await self._transport.request("get", "/api_sellers/api/reviews", params=params)
         return ReviewsResponse.model_validate(data if isinstance(data, dict) else {})

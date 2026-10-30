@@ -5,7 +5,7 @@ import inspect
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, fields
-from typing import Any
+from typing import Any, cast
 
 from .api import AccountAPI, CategoryAPI, ChatAPI, ProductAPI, ReviewAPI, SaleAPI
 from .client_config import GGselClientConfig
@@ -193,9 +193,7 @@ class GGsel:
     def on_message(self, fn: Handler | Predicate | None = None, *, text: TextFilter | None = None):
         return self._on(EventTypes.NEW_MESSAGE, fn, text=text)
 
-    def on_new_sale(
-        self, fn: Handler | Predicate | None = None, *, text: TextFilter | None = None
-    ):
+    def on_new_sale(self, fn: Handler | Predicate | None = None, *, text: TextFilter | None = None):
         return self._on(EventTypes.NEW_SALE, fn, text=text)
 
     def on_new_review(
@@ -219,8 +217,8 @@ class GGsel:
         if fn is None:
             return register
         if inspect.iscoroutinefunction(fn):
-            return register(fn)
-        return lambda func: register(func, predicate=fn)
+            return register(cast(Handler, fn))
+        return lambda func: register(func, predicate=cast(Predicate, fn))
 
     async def _dispatch(self, event: GGselEvent) -> None:
         if event.type in _SKIP:

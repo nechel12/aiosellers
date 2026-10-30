@@ -17,7 +17,9 @@ class GGselConfig:
     ):
         self.user_agent = user_agent or DEFAULT_USER_AGENT
         self.request_timeout = request_timeout or 10.0
-        self.base_url = base_url or os.getenv("GGSEL_BASE_URL", DEFAULT_BASE_URL)
+        self.base_url: str = (
+            base_url or os.getenv("GGSEL_BASE_URL", DEFAULT_BASE_URL) or DEFAULT_BASE_URL
+        )
         self.locale = locale
 
     @property

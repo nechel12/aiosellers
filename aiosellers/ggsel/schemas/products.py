@@ -141,6 +141,4 @@ class TaskStatusResponse(ApiModel):
     success_count: int | None = Field(None, alias="SuccessCount")
     error_count: int | None = Field(None, alias="ErrorCount")
     total_count: int | None = Field(None, alias="TotalCount")
-    errors: list[TaskErrorDescription] = Field(
-        default_factory=list, alias="ErrorsDescriptions"
-    )
+    errors: list[TaskErrorDescription] = Field(default_factory=list, alias="ErrorsDescriptions")

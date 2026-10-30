@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 from typing import TYPE_CHECKING, Any
 
 from ..core.exceptions import RequestFailedError
@@ -22,9 +23,9 @@ class ProductAPI:
         *,
         limit: int = 50,
         page: int = 1,
-        ids: list[int] | None = None,
-    ) -> list[Product]:
-        result: list[Product] = []
+        ids: builtins.list[int] | None = None,
+    ) -> builtins.list[Product]:
+        result: builtins.list[Product] = []
         current_page = max(1, page)
         while len(result) < limit:
             response = await self._client._require_raw().products.list_products(
@@ -52,11 +53,11 @@ class ProductAPI:
         page: int = 1,
         currency: str = "RUB",
         show_hidden: bool = False,
-    ) -> list[Product]:
+    ) -> builtins.list[Product]:
         seller_id = self._client.seller_id
         if seller_id is None:
             raise RequestFailedError("GGsel seller id is not known yet")
-        result: list[Product] = []
+        result: builtins.list[Product] = []
         current_page = max(1, page)
         while len(result) < limit:
             response = await self._client._require_raw().products.seller_goods(
@@ -94,14 +95,14 @@ class ProductAPI:
         product_id: int,
         price: float,
         *,
-        variants: list[dict[str, Any]] | None = None,
+        variants: builtins.list[dict[str, Any]] | None = None,
     ) -> str | int | None:
         item: dict[str, Any] = {"product_id": product_id, "price": price}
         if variants:
             item["variants"] = variants
         return await self.update_prices([item])
 
-    async def update_prices(self, items: list[dict[str, Any]]) -> str | int | None:
+    async def update_prices(self, items: builtins.list[dict[str, Any]]) -> str | int | None:
         if not items:
             raise ValueError("At least one price update is required")
         response = await self._client._require_raw().products.update_prices(items)

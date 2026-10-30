@@ -137,11 +137,11 @@ class _TransportTests(unittest.IsolatedAsyncioTestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def make_transport(self) -> GGselTransport:
+    def make_transport(self, *, base_url="https://seller.ggsel.com/") -> GGselTransport:
         return GGselTransport(
             api_key="secret",
             seller_id=42,
-            config=GGselConfig(base_url="https://seller.ggsel.com/"),
+            config=GGselConfig(base_url=base_url),
         )
 
     def fake_sleep(self):
@@ -175,6 +175,19 @@ class _TransportTests(unittest.IsolatedAsyncioTestCase):
 
         await transport.close()
         self.assertTrue(fake.closed)
+
+    async def test_base_url_without_trailing_slash_is_normalized(self):
+        transport = self.make_transport(base_url="https://seller.ggsel.com")
+        fake = transport._client
+        fake.responses = [_login_ok()]
+
+        await transport.login()
+
+        self.assertEqual(
+            fake.calls[0][1],
+            "https://seller.ggsel.com/api_sellers/api/apilogin",
+        )
+        await transport.close()
 
     async def test_login_is_cached_until_expiry(self):
         transport = self.make_transport()
@@ -668,9 +681,7 @@ class _ApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_categories_and_balance_are_decoded(self):
         raw = _FakeRaw()
         raw.categories.pages = {
-            1: CategoriesResponse(
-                category=[CategorySchema(id=1, name="Games", sub=[2, 3], cnt=10)]
-            )
+            1: CategoriesResponse(category=[CategorySchema(id=1, name="Games", sub=[2, 3], cnt=10)])
         }
         raw.account.balance_response = BalanceResponse(
             content=BalanceContent(amount_t_free=1.0, amount_t_lock=2.0, amount_t_plus=3.0)
@@ -828,9 +839,7 @@ def _message_event(client, chat, text="hi"):
 
 class _DispatchTests(unittest.IsolatedAsyncioTestCase):
     async def test_initial_chat_and_text_filters(self):
-        client = GGsel(
-            GGselClientConfig(api_key="key", seller_id=42, handler_timeout=0.05)
-        )
+        client = GGsel(GGselClientConfig(api_key="key", seller_id=42, handler_timeout=0.05))
         seen = []
 
         @client.on_message
@@ -853,9 +862,7 @@ class _DispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen, ["other"])
 
     async def test_slow_handler_times_out_without_blocking_others(self):
-        client = GGsel(
-            GGselClientConfig(api_key="key", seller_id=42, handler_timeout=0.01)
-        )
+        client = GGsel(GGselClientConfig(api_key="key", seller_id=42, handler_timeout=0.01))
         done = []
 
         @client.on_new_sale

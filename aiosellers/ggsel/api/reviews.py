@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 from typing import TYPE_CHECKING
 
 from ..entities.review import Review
@@ -24,8 +25,8 @@ class ReviewAPI:
         page: int = 1,
         review_type: str = "all",
         product_id: int | None = None,
-    ) -> list[Review]:
-        result: list[Review] = []
+    ) -> builtins.list[Review]:
+        result: builtins.list[Review] = []
         current_page = max(1, page)
         while len(result) < limit:
             response = await self._client._require_raw().reviews.reviews(
