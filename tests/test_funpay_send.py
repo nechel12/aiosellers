@@ -124,9 +124,7 @@ class BotMarkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(transport.text, f"thanks{BOT_MARK}")
 
     def test_client_config_is_copied(self):
-        config = FunPayConfig.from_client(
-            FunPayClientConfig(golden_key="key", bot_mark=False)
-        )
+        config = FunPayConfig.from_client(FunPayClientConfig(golden_key="key", bot_mark=False))
         self.assertFalse(config.bot_mark)
 
 

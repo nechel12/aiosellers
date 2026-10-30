@@ -3,12 +3,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from ..core.state import StateStore
 from .core.utils import order_id_from, random_tag
 from .events import (
     ChatsListChangedEvent,
+    FunPayEvent,
     InitialChatEvent,
     InitialOrderEvent,
     InitialPurchaseEvent,
@@ -50,17 +51,20 @@ _REVIEW_EVENTS = {
 }
 
 
-def message_events(client: FunPay, chat, message, *, reviews: bool):
+def message_events(client: FunPay, chat, message, *, reviews: bool) -> list[FunPayEvent]:
     """One new-message event, plus a review event when the text is a review notice."""
-    events = [NewMessageEvent(client=client, chat=chat, message=message)]
+    events: list[FunPayEvent] = [NewMessageEvent(client=client, chat=chat, message=message)]
     if reviews:
         review_type = _REVIEW_EVENTS.get(message.type)
         if review_type is not None:
             events.append(
-                review_type(
-                    client=client,
-                    message=message,
-                    order_id=order_id_from(message.text),
+                cast(
+                    FunPayEvent,
+                    review_type(
+                        client=client,
+                        message=message,
+                        order_id=order_id_from(message.text),
+                    ),
                 )
             )
     return events
@@ -237,16 +241,10 @@ class EventListener:
         # The runner counters change only when orders are added or removed; status-only
         # transitions are caught by the periodic full resync.
         fetch_sales = orders and (
-            not counters_known
-            or previous is None
-            or resync_due
-            or seller != previous[1]
+            not counters_known or previous is None or resync_due or seller != previous[1]
         )
         fetch_purchases = purchases and (
-            not counters_known
-            or previous is None
-            or resync_due
-            or buyer != previous[0]
+            not counters_known or previous is None or resync_due or buyer != previous[0]
         )
 
         if fetch_sales:
@@ -295,7 +293,7 @@ class EventListener:
             self_id=self.client.account_id or 0,
         )
         if not self._chat_ready:
-            events = []
+            events: list[FunPayEvent] = []
             for shortcut in shortcuts:
                 events.append(
                     InitialChatEvent(
@@ -330,7 +328,9 @@ class EventListener:
             chat = self.client.chats._from_shortcut(shortcut)
             events.append(LastChatMessageChangedEvent(client=self.client, chat=chat))
             try:
-                history = await self._history_since(raw, shortcut.id, shortcut.node_message_id, stored)
+                history = await self._history_since(
+                    raw, shortcut.id, shortcut.node_message_id, stored
+                )
             except Exception:
                 logger.exception("FunPay history failed for chat %s", shortcut.id)
                 # Keep the old cursor so the next tick retries the same gap.
@@ -462,7 +462,6 @@ class EventListener:
             self._mark_state_dirty()
         return events
 
-
     def _mark_state_dirty(self) -> None:
         self._state_dirty = True
         self._state_version += 1
@@ -529,9 +528,7 @@ class EventListener:
         self._chats = chats
         self._orders = orders
         self._purchases = purchases
-        self._chat_ready, self._orders_ready, self._purchases_ready = (
-            bool(flag) for flag in ready
-        )
+        self._chat_ready, self._orders_ready, self._purchases_ready = (bool(flag) for flag in ready)
         self._last_counts = last_counts
         self.sent_ids.clear()
         for chat_id, message_id in sent:
@@ -557,9 +554,7 @@ class EventListener:
                 for chat_id, (node_id, user_id, text) in self._chats.items()
             },
             "orders": {order_id: status.name for order_id, status in self._orders.items()},
-            "purchases": {
-                order_id: status.name for order_id, status in self._purchases.items()
-            },
+            "purchases": {order_id: status.name for order_id, status in self._purchases.items()},
             "ready": [self._chat_ready, self._orders_ready, self._purchases_ready],
             "last_counts": list(self._last_counts) if self._last_counts is not None else None,
             "sent": sent,

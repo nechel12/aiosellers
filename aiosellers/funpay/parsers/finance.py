@@ -8,6 +8,7 @@ from bs4 import BeautifulSoup
 from ..core.utils import exchange_rate_pattern, parse_currency, parse_number
 from ..exceptions import RequestFailedError
 from ..schemas import Balance, Currency, TransactionSnapshot
+from ._bs4 import attr, attr_list
 
 
 def _money(text: str) -> tuple[float, Currency]:
@@ -48,10 +49,8 @@ def parse_offer_balance(html: str) -> Balance:
         raise RequestFailedError("offer balance missing", body=html)
 
     def read(name: str) -> float:
-        raw = select.get(name)
-        if raw in (None, ""):
-            return 0.0
-        return float(raw)
+        raw = attr(select, name)
+        return float(raw) if raw else 0.0
 
     return Balance(
         rub=read("data-balance-rub"),
@@ -67,14 +66,13 @@ def _cursor(soup: BeautifulSoup) -> str | None:
     node = soup.select_one("input[name=continue]")
     if node is None:
         return None
-    value = node.get("value") or None
-    return value or None
+    return attr(node, "value") or None
 
 
 def _tx_status(item) -> str:
-    classes = list(item.get("class") or [])
+    classes = attr_list(item, "class")
     for child in item.find_all(True):
-        classes.extend(child.get("class") or [])
+        classes.extend(attr_list(child, "class"))
     blob = " ".join(classes)
     if "transaction-status-complete" in blob:
         return "completed"
@@ -99,12 +97,13 @@ def _tx_type(description: str) -> str:
 
 
 def _tx_id(item) -> str | None:
-    if item.get("data-transaction"):
-        return str(item["data-transaction"])
-    href = item.get("href") or ""
+    transaction_id = attr(item, "data-transaction")
+    if transaction_id:
+        return transaction_id
+    href = attr(item, "href")
     if not href:
         anchor = item.find("a")
-        href = anchor.get("href") if anchor is not None else ""
+        href = attr(anchor, "href")
     values = parse_qs(urlsplit(href).query).get("id")
     return values[0] if values else None
 
@@ -113,7 +112,7 @@ def parse_transactions(html: str) -> tuple[str | None, list[TransactionSnapshot]
     soup = BeautifulSoup(html, "lxml")
     items = soup.select("div.tc-item")
     if not items:
-        items = soup.find_all(attrs={"data-transaction": True})
+        items = soup.find_all(lambda tag: tag.has_attr("data-transaction"))
     rows: list[TransactionSnapshot] = []
     for item in items:
         tx_id = _tx_id(item)

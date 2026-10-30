@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Literal
+from typing import Any, Literal
 
 from bs4 import BeautifulSoup
 
@@ -75,7 +75,7 @@ class RawChats(RawBase):
         leave_as_unread: bool,
     ):
         del leave_as_unread
-        request = {
+        request: dict[str, Any] = {
             "action": "chat_message",
             "data": {"node": chat_id, "last_message": -1, "content": text or ""},
         }
@@ -126,7 +126,9 @@ class RawChats(RawBase):
             if obj.get("type") != "chat_bookmarks":
                 continue
             data = obj.get("data")
-            html = data.get("html") if isinstance(data, dict) else (data or "")
+            candidate = data.get("html") if isinstance(data, dict) else (data or "")
+            if isinstance(candidate, str):
+                html = candidate
             break
         if not isinstance(html, str):
             return None

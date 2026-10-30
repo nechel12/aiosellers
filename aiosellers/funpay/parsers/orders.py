@@ -6,6 +6,7 @@ from ..core.constants import BOT_MARK, OLD_BOT_MARK
 from ..core.utils import parse_currency, parse_price
 from ..exceptions import UnauthorizedError
 from ..schemas import OrderShortcut, OrderSide, OrderSnapshot, OrderStatuses, ReviewSnapshot
+from ._bs4 import attr, attr_list
 
 _SALES_HEADERS = frozenset({"мои продажи", "my sales", "мої продажі"})
 
@@ -35,9 +36,7 @@ def parse_order_list(html: str, *, side: OrderSide) -> tuple[str | None, list[Or
             if first.lower() not in _SALES_HEADERS:
                 raise UnauthorizedError("sales page unauthorized", body=html)
     cursor_node = soup.select_one("input[name=continue]")
-    cursor = cursor_node.get("value") if cursor_node is not None else None
-    if cursor == "":
-        cursor = None
+    cursor = attr(cursor_node, "value") or None
     orders: list[OrderShortcut] = []
     for row in soup.select("a.tc-item"):
         order_node = row.select_one("div.tc-order")
@@ -50,13 +49,13 @@ def parse_order_list(html: str, *, side: OrderSide) -> tuple[str | None, list[Or
         orders.append(
             OrderShortcut(
                 id=order_id,
-                status=_status(row.get("class") or []),
+                status=_status(attr_list(row, "class")),
                 side=side,
                 description=desc_node.get_text(" ", strip=True) if desc_node is not None else "",
                 price=price,
                 currency=currency,
                 buyer_username=user.get_text(" ", strip=True) if user is not None else "",
-                buyer_id=_user_id(user.get("data-href") if user is not None else None),
+                buyer_id=_user_id(attr(user, "data-href") or None),
                 subcategory_name=sub.get_text(" ", strip=True) if sub is not None else None,
                 html=str(row),
             )

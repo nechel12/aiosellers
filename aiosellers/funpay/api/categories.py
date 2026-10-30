@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 from typing import TYPE_CHECKING
 
 from ..entities.category import Category, SubCategory
@@ -38,7 +39,7 @@ class CategoryAPI:
         )
         return self._client.remember("categories", snap.id, category)
 
-    async def list(self) -> list[Category]:
+    async def list(self) -> builtins.list[Category]:
         transport = self._require()
         return [self._category(item) for item in transport.categories]
 
@@ -62,7 +63,7 @@ class CategoryAPI:
                     return sub
         raise ValueError(f"Unknown subcategory: {subcategory_id}")
 
-    async def search(self, query: str) -> list[Category]:
+    async def search(self, query: str) -> builtins.list[Category]:
         self._require()
         rows = await self._client._raw.lots.search(query)  # type: ignore[union-attr]
         return [self._category(item) for item in rows]

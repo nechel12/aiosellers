@@ -58,7 +58,7 @@ class FunPayTransport:
         self.active_sales: int = 0
         self.active_purchases: int = 0
         self.categories: list = []
-        self.currency = None
+        self.currency: Any = None
         self.last_refresh: float = 0.0
         self.rate_limited_until: float = 0.0
         self._limiter = asyncio.Semaphore(max(1, self._config.max_concurrent_requests))
@@ -272,7 +272,7 @@ class FunPayTransport:
             soup = BeautifulSoup(text, "lxml")
             body = soup.find("body")
             raw = body.get("data-app-data") if body is not None else None
-            if raw:
+            if isinstance(raw, str) and raw:
                 try:
                     app = json.loads(raw)
                 except json.JSONDecodeError:

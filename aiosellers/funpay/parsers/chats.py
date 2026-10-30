@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 from ..core.constants import IMAGE_PLACEHOLDERS
 from ..core.utils import classify_message, strip_bot_mark, strip_invisible_suffix
 from ..schemas import ChatShortcut, MessageSnapshot, MessageTypes
+from ._bs4 import attr, attr_list
 
 _SUPPORT = frozenset({"поддержка", "підтримка", "support"})
 _MODERATION = frozenset({"модерация", "модерація", "moderation"})
@@ -27,14 +28,14 @@ def parse_bookmarks(html: str, *, self_id: int) -> list[ChatShortcut]:
         else:
             text, last_by_bot = strip_bot_mark(preview, author_is_self=False)
         name_node = anchor.select_one("div.media-user-name")
-        classes = anchor.get("class") or []
+        classes = attr_list(anchor, "class")
         chats.append(
             ChatShortcut(
-                id=int(anchor.get("data-id") or 0),
+                id=int(attr(anchor, "data-id") or 0),
                 name=name_node.get_text(" ", strip=True) if name_node is not None else "",
                 last_message_text=text,
-                node_message_id=int(anchor.get("data-node-msg") or 0),
-                user_message_id=int(anchor.get("data-user-msg") or 0),
+                node_message_id=int(attr(anchor, "data-node-msg") or 0),
+                user_message_id=int(attr(anchor, "data-user-msg") or 0),
                 unread="unread" in classes,
                 last_by_bot=last_by_bot,
                 html=str(anchor),
@@ -86,9 +87,9 @@ def parse_history(
         image_name = None
         image = soup.select_one("a.chat-img-link")
         if image is not None:
-            image_link = image.get("href")
+            image_link = attr(image, "href") or None
             img = image.select_one("img") or soup.select_one("img")
-            image_name = img.get("alt") if img is not None else None
+            image_name = (attr(img, "alt") or None) if img is not None else None
             text = None
             by_bot = False
         else:

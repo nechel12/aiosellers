@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 from typing import TYPE_CHECKING, AsyncIterator, Literal
 
 from ..entities.order import Order
@@ -91,11 +92,11 @@ class OrderAPI:
         include_paid: bool = True,
         include_closed: bool = True,
         include_refunded: bool = True,
-    ) -> tuple[str | None, list[Order]]:
+    ) -> tuple[str | None, builtins.list[Order]]:
         if side is OrderSide.PURCHASE:
             cursor, rows = await self._require().orders.purchases(cursor)
         else:
-            query = {}
+            query: dict[str, object] = {}
             if buyer is not None:
                 query["buyer"] = buyer
             if state is not None:

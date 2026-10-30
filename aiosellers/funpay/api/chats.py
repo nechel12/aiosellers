@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -46,7 +47,7 @@ class ChatMessagesAPI:
         *,
         last_message_id: int | None = None,
         limit: int = 100,
-    ) -> list[Message]:
+    ) -> builtins.list[Message]:
         last = 9999999999999999999 if last_message_id is None else last_message_id
         snaps = await self._client.chats._require().chats.history(chat_id, last)
         messages = [self._client.chats._message(snap) for snap in snaps if snap.id > 0]
@@ -106,7 +107,7 @@ class ChatAPI:
         )
         return self._client.remember("chats", shortcut.id, chat)
 
-    async def list(self, *, fetch: bool = True) -> list[Chat]:
+    async def list(self, *, fetch: bool = True) -> builtins.list[Chat]:
         if not fetch:
             if not self._client._use_identity_map:
                 return []
@@ -122,9 +123,11 @@ class ChatAPI:
             if obj.get("type") != "chat_bookmarks":
                 continue
             data = obj.get("data")
-            html = data.get("html") if isinstance(data, dict) else (data or "")
+            candidate = data.get("html") if isinstance(data, dict) else (data or "")
+            if isinstance(candidate, str):
+                html = candidate
             break
-        shortcuts = parse_bookmarks(html if isinstance(html, str) else "", self_id=account_id)
+        shortcuts = parse_bookmarks(html, self_id=account_id)
         return [self._from_shortcut(shortcut) for shortcut in shortcuts]
 
     async def get(self, chat_id: int, *, force_refresh: bool = False) -> Chat:

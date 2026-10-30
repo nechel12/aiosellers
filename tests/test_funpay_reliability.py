@@ -23,9 +23,7 @@ class _RunnerRaw:
 
     async def runner(self, objects):
         assert objects
-        return {
-            "objects": [{"type": "chat_bookmarks", "data": {"html": self.html}}]
-        }
+        return {"objects": [{"type": "chat_bookmarks", "data": {"html": self.html}}]}
 
 
 class ChatIdentityTests(unittest.IsolatedAsyncioTestCase):

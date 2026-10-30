@@ -133,6 +133,7 @@ class RawLots(RawBase):
     ) -> CalcResult:
         if kind is SubCategoryTypes.CURRENCY and game_id is None:
             raise ValueError("game_id is required for currency calc")
+        data: dict[str, object]
         if kind is SubCategoryTypes.COMMON:
             path = "lots/calc"
             data = {"nodeId": subcategory_id, "price": price}

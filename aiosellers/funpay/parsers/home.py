@@ -13,6 +13,7 @@ from ..schemas import (
     SubCategoryTypes,
     UserSnapshot,
 )
+from ._bs4 import attr
 
 
 def _text(node) -> str:
@@ -22,7 +23,7 @@ def _text(node) -> str:
 
 
 def _subcategory(anchor, category_id: int, position: int) -> SubCategorySnapshot | None:
-    href = anchor.get("href") or ""
+    href = attr(anchor, "href")
     parts = [part for part in href.split("/") if part]
     if len(parts) < 2:
         return None
@@ -49,12 +50,12 @@ def parse_categories(html: str) -> list[CategorySnapshot]:
     position = 0
     for item in container.select("div.promo-game-item"):
         title = item.select_one("div.game-title")
-        game_raw = title.get("data-id") if title is not None else None
-        game_id = int(game_raw) if game_raw and str(game_raw).isdigit() else 0
+        game_raw = attr(title, "data-id")
+        game_id = int(game_raw) if game_raw and game_raw.isdigit() else 0
         game_name = _text(item.select_one("a"))
         grouped: dict[str, list[SubCategorySnapshot]] = {}
         for ul in item.select("ul.list-inline"):
-            owner = ul.get("data-id") or str(game_id)
+            owner = attr(ul, "data-id") or str(game_id)
             owner_id = int(owner) if str(owner).isdigit() else game_id
             bucket = grouped.setdefault(str(owner_id), [])
             for anchor in ul.select("li a"):
@@ -74,8 +75,8 @@ def parse_categories(html: str) -> list[CategorySnapshot]:
         if group is None:
             continue
         for button in group.select("button[data-id]"):
-            raw = button.get("data-id")
-            if not raw or not str(raw).isdigit():
+            raw = attr(button, "data-id")
+            if not raw or not raw.isdigit():
                 continue
             button_id = int(raw)
             categories.append(
@@ -95,9 +96,10 @@ def parse_home(html: str) -> AccountSnapshot:
     username = _text(soup.select_one("div.user-link-name"))
     body = soup.find("body")
     app: dict = {}
-    if body is not None and body.get("data-app-data"):
+    app_data = attr(body, "data-app-data")
+    if app_data:
         try:
-            loaded = json.loads(body["data-app-data"])
+            loaded = json.loads(app_data)
         except json.JSONDecodeError:
             loaded = {}
         if isinstance(loaded, dict):
@@ -126,7 +128,7 @@ def parse_user(html: str, user_id: int) -> UserSnapshot:
     avatar = None
     photo = soup.select_one("div.avatar-photo")
     if photo is not None:
-        match = re.search(r"url\(([^)]+)\)", photo.get("style") or "")
+        match = re.search(r"url\(([^)]+)\)", attr(photo, "style"))
         if match:
             avatar = match.group(1).strip("\"'")
             if avatar.startswith("//"):

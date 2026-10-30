@@ -5,7 +5,7 @@ import inspect
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, fields
-from typing import Any
+from typing import Any, cast
 
 from .api import AccountAPI, CategoryAPI, ChatAPI, FinanceAPI, LotAPI, OrderAPI
 from .client_config import FunPayClientConfig
@@ -358,8 +358,8 @@ class FunPay:
         if fn is None:
             return register
         if inspect.iscoroutinefunction(fn):
-            return register(fn)
-        return lambda func: register(func, predicate=fn)
+            return register(cast(Handler, fn))
+        return lambda func: register(func, predicate=cast(Predicate, fn))
 
     async def _dispatch(self, event: FunPayEvent) -> None:
         if event.type in _SKIP:
@@ -371,7 +371,10 @@ class FunPay:
             for handler in self._handlers
         ):
             try:
-                order = await self.orders.get(getattr(event, "order_id", None))
+                order_id = getattr(event, "order_id", None)
+                if order_id is None:
+                    raise ValueError("review event has no order id")
+                order = await self.orders.get(str(order_id))
                 stars = order.review.stars if order.review is not None else None
             except Exception:
                 logger.exception("Review star lookup failed")

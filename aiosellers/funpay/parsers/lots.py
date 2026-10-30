@@ -8,6 +8,7 @@ from bs4 import BeautifulSoup
 from ..core.utils import parse_currency, parse_price
 from ..exceptions import LotParsingError
 from ..schemas import Currency, LotShortcut, MyLotShortcut, SubCategoryTypes
+from ._bs4 import attr, attr_list
 
 
 def _query_id(href: str) -> str | None:
@@ -30,6 +31,7 @@ def _offer_id(row) -> str:
     if offer:
         return offer[0]
     return _query_id(href) or ""
+
 
 def _server(row) -> str | None:
     node = row.select_one("div.tc-server.hidden-xxs") or row.select_one("div.tc-server.hidden-xs")
@@ -79,7 +81,7 @@ def parse_public_lots(
         seller_id, seller_name = _seller(row)
         lots.append(
             LotShortcut(
-                id=_query_id(row.get("href") or "") or "",
+                id=_query_id(attr(row, "href")) or "",
                 server=_server(row),
                 description=desc.get_text(" ", strip=True) if desc is not None else None,
                 price=_price(row, kind),
@@ -105,12 +107,13 @@ def parse_my_lots(html: str, *, subcategory_id: int) -> list[MyLotShortcut]:
     soup = BeautifulSoup(html, "lxml")
     lots: list[MyLotShortcut] = []
     for row in soup.select("a.tc-item"):
-        classes = row.get("class") or []
+        classes = attr_list(row, "class")
         desc = row.select_one("div.tc-desc-text")
         price_node = row.select_one("div.tc-price")
         price = None
-        if price_node is not None and price_node.get("data-s") not in (None, ""):
-            price = float(price_node["data-s"])
+        raw_price = attr(price_node, "data-s")
+        if price_node is not None and raw_price:
+            price = float(raw_price)
         elif price_node is not None:
             price = parse_price(price_node.get_text(" ", strip=True))[0]
         lots.append(

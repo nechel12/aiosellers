@@ -93,7 +93,11 @@ def _runner(html: str, *, buyer: int = 1, seller: int = 2) -> dict:
     return {
         "objects": [
             {"type": "chat_bookmarks", "tag": "chat-tag", "data": html},
-            {"type": "orders_counters", "tag": "order-tag", "data": {"buyer": buyer, "seller": seller}},
+            {
+                "type": "orders_counters",
+                "tag": "order-tag",
+                "data": {"buyer": buyer, "seller": seller},
+            },
         ]
     }
 
@@ -211,9 +215,7 @@ class FunPayEventTests(unittest.IsolatedAsyncioTestCase):
         raw3.payloads.append(_runner("", seller=3))
         raw3.sales_pages.append(parse_order_list(wide, side=OrderSide.SALE))
         large = await listener3.tick(messages=False, purchases=False)
-        self.assertEqual(
-            [event.type for event in large].count(EventTypes.NEW_ORDER), 101
-        )
+        self.assertEqual([event.type for event in large].count(EventTypes.NEW_ORDER), 101)
 
     async def test_order_pagination_reads_all_pages(self) -> None:
         _client, listener, raw = _listener()
