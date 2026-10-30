@@ -7,6 +7,8 @@ from aiosellers import (
     EventKind,
     FunPay,
     FunPayClientConfig,
+    GGsel,
+    GGselClientConfig,
     Platform,
     Playerok,
     PlayerokClientConfig,
@@ -15,6 +17,7 @@ from aiosellers import (
 )
 from aiosellers.core import capabilities_for, event_kind
 from aiosellers.funpay.schemas import EventTypes as FunPayEvents
+from aiosellers.ggsel.schemas import EventTypes as GGselEvents
 from aiosellers.playerok.schemas import EventTypes as PlayerokEvents
 
 
@@ -58,6 +61,7 @@ class CapabilityTests(unittest.TestCase):
     def test_capability_matrix_matches_platform_size(self):
         funpay = capabilities_for(Platform.FUNPAY)
         playerok = capabilities_for("playerok")
+        ggsel = capabilities_for(Platform.GGSEL)
 
         self.assertIn(Capability.ORDERS, funpay)
         self.assertIn(Capability.PURCHASES, funpay)
@@ -66,6 +70,10 @@ class CapabilityTests(unittest.TestCase):
         self.assertIn(Capability.ITEM_PRIORITY, playerok)
         self.assertIn(Capability.WEBSOCKET, playerok)
         self.assertNotIn(Capability.ORDERS, playerok)
+        self.assertIn(Capability.ORDERS, ggsel)
+        self.assertIn(Capability.MESSAGES, ggsel)
+        self.assertIn(Capability.REVIEWS, ggsel)
+        self.assertNotIn(Capability.WEBSOCKET, ggsel)
 
     def test_event_kind_maps_both_platforms_and_unknown_names(self):
         self.assertIs(
@@ -82,6 +90,15 @@ class CapabilityTests(unittest.TestCase):
         self.assertIs(
             event_kind(Platform.PLAYEROK, _event(PlayerokEvents.NEW_REVIEW)), EventKind.REVIEW
         )
+        self.assertIs(
+            event_kind(Platform.GGSEL, _event(GGselEvents.NEW_SALE)), EventKind.ORDER
+        )
+        self.assertIs(
+            event_kind(Platform.GGSEL, _event(GGselEvents.NEW_REVIEW)), EventKind.REVIEW
+        )
+        self.assertIs(
+            event_kind(Platform.GGSEL, _event(GGselEvents.INITIAL_CHAT)), EventKind.INITIAL
+        )
         future = SimpleNamespace(name="NEW_REVIEW_V2")
         self.assertIs(event_kind(Platform.PLAYEROK, _event(future)), EventKind.REVIEW)
         mystery = SimpleNamespace(name="SOMETHING_ELSE")
@@ -92,6 +109,9 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
     def test_both_clients_satisfy_the_protocol(self):
         self.assertIsInstance(FunPay(FunPayClientConfig(golden_key="key")), SellerClient)
         self.assertIsInstance(Playerok(PlayerokClientConfig(access_token="token")), SellerClient)
+        self.assertIsInstance(
+            GGsel(GGselClientConfig(api_key="key", seller_id=42)), SellerClient
+        )
 
     def test_session_ids_and_duplicates(self):
         hub = SellerHub()

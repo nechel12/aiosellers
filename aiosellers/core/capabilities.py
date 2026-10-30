@@ -8,6 +8,7 @@ from enum import Flag, StrEnum, auto
 class Platform(StrEnum):
     FUNPAY = "funpay"
     PLAYEROK = "playerok"
+    GGSEL = "ggsel"
 
 
 class Capability(Flag):
@@ -40,6 +41,12 @@ CAPABILITIES: dict[Platform, Capability] = {
         | Capability.IMAGE_UPLOAD
         | Capability.ITEM_PRIORITY
         | Capability.WEBSOCKET
+    ),
+    Platform.GGSEL: (
+        Capability.MESSAGES
+        | Capability.ORDERS
+        | Capability.REVIEWS
+        | Capability.LIST_MANAGEMENT
     ),
 }
 

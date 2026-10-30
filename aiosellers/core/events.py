@@ -43,6 +43,12 @@ _KINDS: dict[Platform, dict[str, EventKind]] = {
         "REVIEW_CHANGED": EventKind.REVIEW,
         "REVIEW_DELETED": EventKind.REVIEW,
     },
+    Platform.GGSEL: {
+        "INITIAL_CHAT": EventKind.INITIAL,
+        "NEW_MESSAGE": EventKind.MESSAGE,
+        "NEW_SALE": EventKind.ORDER,
+        "NEW_REVIEW": EventKind.REVIEW,
+    },
     Platform.PLAYEROK: {
         "CHAT_INITIALIZED": EventKind.INITIAL,
         "NEW_MESSAGE": EventKind.MESSAGE,

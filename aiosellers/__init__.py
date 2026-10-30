@@ -1,4 +1,4 @@
-"""All-in-one sellers API: FunPay and Playerok behind one package."""
+"""All-in-one sellers API: FunPay, Playerok and GGsel behind one package."""
 
 from .core import (
     CAPABILITIES,
@@ -16,6 +16,7 @@ from .core import (
     event_kind,
 )
 from .funpay import FunPay, FunPayClientConfig
+from .ggsel import GGsel, GGselClientConfig
 from .playerok import Playerok, PlayerokClientConfig
 
 __all__ = [
@@ -24,6 +25,8 @@ __all__ = [
     "EventKind",
     "FunPay",
     "FunPayClientConfig",
+    "GGsel",
+    "GGselClientConfig",
     "HubEvent",
     "MemoryStateStore",
     "Platform",

@@ -16,7 +16,7 @@ logger = logging.getLogger("aiosellers.hub")
 
 @runtime_checkable
 class SellerClient(Protocol):
-    """What the hub needs from a platform client; ``FunPay`` and ``Playerok`` match."""
+    """What the hub needs from a platform client; FunPay, Playerok and GGsel match."""
 
     async def start(self) -> None: ...
 
