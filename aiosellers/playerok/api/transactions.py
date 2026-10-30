@@ -55,7 +55,7 @@ class TransactionAPI:
         current_cursor = cursor
 
         while remain > 0:
-            response = await self._client._raw.transactions.get_transactions(
+            response = await self._client._require_raw().transactions.get_transactions(
                 user_id=self._client._me_id,
                 count=min(24, remain),
                 operation=operation,
@@ -95,7 +95,7 @@ class TransactionAPI:
     ) -> AsyncIterator[Transaction]:
         current_cursor = cursor
         while True:
-            response = await self._client._raw.transactions.get_transactions(
+            response = await self._client._require_raw().transactions.get_transactions(
                 user_id=self._client._me_id,
                 operation=operation,
                 min_value=min_value,
@@ -117,10 +117,10 @@ class TransactionAPI:
     async def providers(
         self, direction: TransactionProviderDirections = TransactionProviderDirections.IN
     ) -> list[TransactionProvider]:
-        return await self._client._raw.transactions.get_transaction_providers(direction)
+        return await self._client._require_raw().transactions.get_transaction_providers(direction)
 
     async def sbp_banks(self) -> list[SBPBankMember]:
-        return await self._client._raw.transactions.get_sbp_bank_members()
+        return await self._client._require_raw().transactions.get_sbp_bank_members()
 
     async def cards(
         self,
@@ -133,7 +133,7 @@ class TransactionAPI:
         remain = limit
         current_cursor = cursor
         while remain > 0:
-            response = await self._client._raw.transactions.get_verified_cards(
+            response = await self._client._require_raw().transactions.get_verified_cards(
                 count=min(24, remain),
                 after_cursor=current_cursor,
                 direction=direction,
@@ -150,7 +150,7 @@ class TransactionAPI:
         return result[:limit]
 
     async def delete_card(self, card_id: str) -> bool:
-        return await self._client._raw.transactions.delete_card(card_id)
+        return await self._client._require_raw().transactions.delete_card(card_id)
 
     async def withdraw(
         self,
@@ -161,7 +161,7 @@ class TransactionAPI:
         payment_method_id: TransactionPaymentMethodIds | None = None,
         sbp_bank_member_id: str | None = None,
     ) -> Transaction:
-        schema = await self._client._raw.transactions.request_withdrawal(
+        schema = await self._client._require_raw().transactions.request_withdrawal(
             provider=provider,
             account=account,
             value=value,
@@ -171,5 +171,5 @@ class TransactionAPI:
         return self._create(schema)
 
     async def cancel(self, transaction_id: str) -> Transaction:
-        schema = await self._client._raw.transactions.remove_transaction(transaction_id)
+        schema = await self._client._require_raw().transactions.remove_transaction(transaction_id)
         return self._create(schema)

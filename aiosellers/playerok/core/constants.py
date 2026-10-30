@@ -20,16 +20,22 @@ BASE_HEADERS = {
 }
 
 EXAMPLE_USER_AGENTS = [
-    "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 7_0_2; en-US) Gecko/20100101 Firefox/57.1",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 9_8_3) AppleWebKit/534.47 (KHTML, like Gecko) Chrome/51.0.1124.252 Safari/535",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_2_9) Gecko/20100101 Firefox/65.6",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_0_2) AppleWebKit/536.44 (KHTML, like Gecko) Chrome/49.0.2950.348 Safari/602",
-    "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 9_9_9; en-US) Gecko/20130401 Firefox/59.3",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_1_1; en-US) AppleWebKit/534.17 (KHTML, like Gecko) Chrome/53.0.2619.208 Safari/535",
-    "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_7_8) Gecko/20130401 Firefox/59.9",
-    "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_6_0) Gecko/20130401 Firefox/68.4",
-    "Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_3_5; en-US) Gecko/20100101 Firefox/53.9",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 7_1_1; en-US) Gecko/20130401 Firefox/61.0",
+    (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
+    ),
+    (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/143.0.7499.41 Safari/537.36"
+    ),
+    (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/143.0.7499.110 Safari/537.36"
+    ),
+    (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/143.0.7499.169 Safari/537.36"
+    ),
 ]
 
 CLOUDFLARE_SIGNATURES = [

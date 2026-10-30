@@ -5,7 +5,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
-from .exceptions import GraphQLError
+from .exceptions import GraphQLError, PersistedQueryExpired
 from .types import ImageInput
 
 
@@ -20,12 +20,24 @@ def _dig(obj: dict[str, Any], path: Iterable[str]) -> Any:
 
 def _raise_on_gql_errors(payload: dict[str, Any]) -> None:
     errors = payload.get("errors")
-    if errors:
-        if len(errors) >= 1:
-            if "message" in errors[0]:
-                raise GraphQLError(errors[0]["message"] + ": " + str(errors[0]))
-            raise GraphQLError(errors[0])
-        raise GraphQLError(errors)
+    if not errors:
+        return
+    first = errors[0]
+    message = first.get("message") if isinstance(first, dict) else str(first)
+    code = ""
+    if isinstance(first, dict):
+        extensions = first.get("extensions")
+        if isinstance(extensions, dict):
+            code = str(extensions.get("code") or "")
+    if "PERSISTED_QUERY" in code.upper() or "persisted" in (message or "").lower():
+        raise PersistedQueryExpired(
+            "Playerok rejected a persisted GraphQL query "
+            f"({message or code}). The frontend contract has probably changed; "
+            "refresh the QueryID hashes or send the full query text."
+        )
+    if isinstance(first, dict) and "message" in first:
+        raise GraphQLError(first["message"] + ": " + str(first))
+    raise GraphQLError(first)
 
 
 async def prepare_image_file(image: ImageInput) -> tuple[Any, bool]:

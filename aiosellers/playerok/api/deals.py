@@ -35,7 +35,7 @@ class DealAPI:
             if cached:
                 return cached
 
-        schema = await self._client._raw.deals.get_deal(deal_id)
+        schema = await self._client._require_raw().deals.get_deal(deal_id)
         if schema is None:
             return None
 
@@ -56,7 +56,7 @@ class DealAPI:
         current_cursor = cursor
 
         while remain > 0:
-            response = await self._client._raw.deals.get_deals(
+            response = await self._client._require_raw().deals.get_deals(
                 user_id=self._client._me_id,
                 count=min(24, remain),
                 after_cursor=current_cursor,
@@ -105,7 +105,7 @@ class DealAPI:
         current_cursor = cursor
 
         while True:
-            response = await self._client._raw.deals.get_deals(
+            response = await self._client._require_raw().deals.get_deals(
                 user_id=self._client._me_id,
                 after_cursor=current_cursor,
                 statuses=statuses,
@@ -134,20 +134,20 @@ class DealAPI:
 
     async def confirm(self, deal_id: str) -> Deal:
         """Confirm DONE work (for buyer)"""
-        updated = await self._client._raw.deals.update_deal(deal_id, ItemDealStatuses.CONFIRMED)
+        updated = await self._client._require_raw().deals.update_deal(deal_id, ItemDealStatuses.CONFIRMED)
         if updated is None:
             return await self.get(deal_id, force_refresh=True)
         return self._create_deal(updated)
 
     async def complete(self, deal_id: str) -> Deal:
         """Mark PAID work as COMPLETED (sent), ask for confirmation (for seller)"""
-        updated = await self._client._raw.deals.update_deal(deal_id, ItemDealStatuses.SENT)
+        updated = await self._client._require_raw().deals.update_deal(deal_id, ItemDealStatuses.SENT)
         if updated is None:
             return await self.get(deal_id, force_refresh=True)
         return self._create_deal(updated)
 
     async def report_problem(self, deal_id: str, description: str, problem_type_id: str) -> Deal:
-        updated = await self._client._raw.deals.report_problem(
+        updated = await self._client._require_raw().deals.report_problem(
             deal_id, description, problem_type_id
         )
         if updated is None:
@@ -159,7 +159,7 @@ class DealAPI:
 
     async def cancel(self, deal_id: str) -> Deal:
         """Reject PAID work and refund money (for seller)"""
-        updated = await self._client._raw.deals.update_deal(deal_id, ItemDealStatuses.ROLLED_BACK)
+        updated = await self._client._require_raw().deals.update_deal(deal_id, ItemDealStatuses.ROLLED_BACK)
         if updated is None:
             return await self.get(deal_id, force_refresh=True)
         return self._create_deal(updated)
@@ -204,7 +204,7 @@ class DealAPI:
         fields_dict = self._extract_obtaining_fields(obtaining_fields)
 
         # Create deal via raw API
-        transaction = await self._client._raw.deals.create_deal(
+        transaction = await self._client._require_raw().deals.create_deal(
             item_id=item_id,
             transaction_provider_id=TransactionProviderIds.LOCAL,
             obtaining_fields=fields_dict,

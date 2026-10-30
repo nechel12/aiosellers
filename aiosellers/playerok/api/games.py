@@ -47,7 +47,7 @@ class GameAPI:
             force_refresh: Reserved for future caching. Currently has no effect.
         """
         _ = force_refresh  # reserved for future caching
-        schema = await self._client._raw.games.get_game_category(game_id=game_id, slug=slug, id=id)
+        schema = await self._client._require_raw().games.get_game_category(game_id=game_id, slug=slug, id=id)
         if schema is None:
             return None
 
@@ -103,7 +103,7 @@ class GameAPI:
             if cached:
                 return cached
 
-        schema = await self._client._raw.games.get_game(id, slug)
+        schema = await self._client._require_raw().games.get_game(id, slug)
         if schema is None:
             return None
 
@@ -122,7 +122,7 @@ class GameAPI:
         current_cursor = cursor
 
         while remain > 0:
-            response = await self._client._raw.games.get_games(
+            response = await self._client._require_raw().games.get_games(
                 count=min(24, remain),
                 cursor=current_cursor,
                 type=type,
@@ -152,7 +152,7 @@ class GameAPI:
         current_cursor = cursor
 
         while True:
-            response = await self._client._raw.games.get_games(
+            response = await self._client._require_raw().games.get_games(
                 cursor=current_cursor,
                 type=type,
                 search=search,
@@ -170,7 +170,7 @@ class GameAPI:
     # --- Sub-entity methods ---
 
     async def get_category_options(self, category_id: str) -> list[GameCategoryOption]:
-        raw_options = await self._client._raw.games.get_game_category_options(
+        raw_options = await self._client._require_raw().games.get_game_category_options(
             game_category_id=category_id
         )
 
@@ -219,7 +219,7 @@ class GameAPI:
         current_cursor = cursor
 
         while remain > 0:
-            response = await self._client._raw.games.get_game_category_obtaining_types(
+            response = await self._client._require_raw().games.get_game_category_obtaining_types(
                 game_category_id=category_id,
                 cursor=current_cursor,
             )
@@ -257,7 +257,7 @@ class GameAPI:
         user_id = self._client._me_id
 
         while remain > 0:
-            response = await self._client._raw.games.get_game_category_agreements(
+            response = await self._client._require_raw().games.get_game_category_agreements(
                 game_category_id=category_id,
                 user_id=user_id,
                 cursor=current_cursor,
@@ -285,7 +285,7 @@ class GameAPI:
         return result
 
     async def accept_agreement(self, agreement_id: str) -> bool:
-        resp = await self._client._raw.games.accept_game_category_agreement(
+        resp = await self._client._require_raw().games.accept_game_category_agreement(
             agreement_id, self._client._me_id
         )
         return resp is not None
@@ -303,7 +303,7 @@ class GameAPI:
         current_cursor = cursor
 
         while remain > 0:
-            response = await self._client._raw.games.get_game_category_instructions(
+            response = await self._client._require_raw().games.get_game_category_instructions(
                 game_category_id=category_id,
                 obtaining_type_id=obtaining_type_id,
                 cursor=current_cursor,
@@ -344,7 +344,7 @@ class GameAPI:
         current_cursor = cursor
 
         while True:
-            response = await self._client._raw.games.get_game_category_data_fields(
+            response = await self._client._require_raw().games.get_game_category_data_fields(
                 game_category_id=category_id,
                 obtaining_type_id=obtaining_type_id,
                 cursor=current_cursor,

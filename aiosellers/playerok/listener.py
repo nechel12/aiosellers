@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import random
 import uuid
 from collections import deque
 from datetime import datetime, timezone
@@ -11,6 +12,7 @@ from typing import TYPE_CHECKING, Any, AsyncIterator
 
 from pydantic import ValidationError
 
+from ..core.state import StateStore
 from .documents import CHAT_MESSAGE_CREATED, CHAT_UPDATED, USER_UPDATED
 from .events import (
     _DEAL_EVENT,
@@ -29,7 +31,27 @@ if TYPE_CHECKING:
 logger = logging.getLogger("aiosellers.playerok.listener")
 
 _WS_URL = "wss://ws.playerok.com/graphql"
+_WS_RECONNECT_INITIAL = 1.0
+_WS_RECONNECT_MAX = 30.0
 _STOP = object()
+_DRIFT_WARNED: set[tuple[str, str]] = set()
+
+
+def _warn_drift(kind: str, exc: ValidationError) -> None:
+    details = exc.errors()
+    first = details[0] if details else {}
+    location = ".".join(str(part) for part in first.get("loc", ())) or first.get("type", "?")
+    signature = (kind, location)
+    if signature in _DRIFT_WARNED:
+        return
+    _DRIFT_WARNED.add(signature)
+    logger.warning(
+        "Playerok %s payload no longer matches the schema at %s (%s); "
+        "falling back to partial data",
+        kind,
+        location,
+        first.get("msg", first.get("type", "unknown")),
+    )
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -64,8 +86,8 @@ def classify_message(text: str | None) -> list[EventTypes]:
 def parse_chat_message(data: dict[str, Any]) -> ChatMessageSchema:
     try:
         return ChatMessageSchema.model_validate(data)
-    except ValidationError:
-        logger.debug("Chat message payload did not match the schema", exc_info=True)
+    except ValidationError as exc:
+        _warn_drift("chat message", exc)
     slim: dict[str, Any] = {
         "id": data.get("id"),
         "text": data.get("text"),
@@ -128,8 +150,8 @@ def parse_chat_message(data: dict[str, Any]) -> ChatMessageSchema:
 def parse_chat(data: dict[str, Any]) -> ChatSchema:
     try:
         return ChatSchema.model_validate(data)
-    except ValidationError:
-        logger.debug("Chat payload did not match the schema", exc_info=True)
+    except ValidationError as exc:
+        _warn_drift("chat", exc)
     slim = {"id": data.get("id"), "type": data.get("type") or "PM"}
     last = data.get("lastMessage")
     if isinstance(last, dict):
@@ -151,6 +173,9 @@ class EventListener:
         new_chat_pause: float = 8.0,
         review_delay: float = 30.0,
         review_tries: int = 30,
+        review_refresh_interval: float = 300.0,
+        state: StateStore | None = None,
+        processed_history_limit: int = 300,
     ) -> None:
         self.client = client
         self.refetch_message_delay = refetch_message_delay
@@ -160,20 +185,32 @@ class EventListener:
         self.new_chat_pause = new_chat_pause
         self.review_delay = review_delay
         self.review_tries = review_tries
+        self.review_refresh_interval = review_refresh_interval
+        self.state = state
+        self.processed_history_limit = max(1, processed_history_limit)
 
         self.sent: list[str] = []
         self.processed_message_ids: set[str] = set()
         self._processed_order: deque[str] = deque()
         self.processed_deal_ids: set[str] = set()
+        self.known_deal_ids: set[str] = set()
+        self._deals_baseline_ready = False
         self.review_deal_ids: list[str] = []
         self.review_checks: dict[str, dict[str, float | int]] = {}
         self.known_chat_ids: set[str] = set()
+        self._needs_resync = False
         self._chats: dict[str, ChatSchema] = {}
         self.chat_subscriptions: dict[str, str] = {}
+        self._control_subscriptions: dict[str, tuple[str, str, dict[str, Any]]] = {}
         self._possible_new_chat = asyncio.Event()
         self._stop = asyncio.Event()
         self._ws: Any = None
         self._tasks: list[asyncio.Task[Any]] = []
+        self._state_loaded = False
+        self._state_key: str | None = None
+        self._state_dirty = False
+        self._state_version = 0
+        self._state_lock = asyncio.Lock()
 
     def remember_history(self, chats: list[ChatSchema], *, now: datetime | None = None) -> None:
         moment = now or datetime.now(timezone.utc)
@@ -211,21 +248,57 @@ class EventListener:
     def subscription_frames(self) -> list[dict[str, Any]]:
         user_id = self.client.me_id
         frames = [
-            self._subscribe(
+            self._control_frame(
                 "chatUpdated",
                 CHAT_UPDATED,
                 {"filter": {"userId": user_id}, "showForbiddenImage": True},
             ),
-            self._subscribe("userUpdated", USER_UPDATED, {"userId": user_id}),
+            self._control_frame("userUpdated", USER_UPDATED, {"userId": user_id}),
         ]
         for chat_id in list(self.known_chat_ids):
             frames.append(self._chat_message_frame(chat_id))
         return frames
 
     async def handle_frame(self, data: dict[str, Any]) -> list[PlayerokEvent]:
-        if data.get("type") == "connection_ack":
+        try:
+            return await self._handle_frame(data)
+        finally:
+            await self._save_state()
+
+    async def _handle_frame(self, data: dict[str, Any]) -> list[PlayerokEvent]:
+        frame_type = data.get("type")
+
+        if frame_type == "connection_ack":
             for frame in self.subscription_frames():
                 await self._send(frame)
+            return []
+
+        if frame_type == "ping":
+            await self._send({"type": "pong"})
+            return []
+
+        if frame_type == "pong":
+            return []
+
+        if frame_type == "connection_error":
+            logger.warning("Playerok rejected the WS connection: %s", data.get("payload"))
+            return []
+
+        if frame_type == "error":
+            logger.warning("Playerok subscription error: %s", data.get("payload"))
+            return []
+
+        if frame_type == "complete":
+            sub_id = str(data.get("id")) if data.get("id") else None
+            chat_id = self.chat_subscriptions.pop(sub_id, None) if sub_id else None
+            if chat_id is not None:
+                logger.debug("Subscription for chat %s completed; resubscribing", chat_id)
+                await self._send(self._chat_message_frame(chat_id))
+            elif sub_id is not None:
+                control = self._control_subscriptions.get(sub_id)
+                if control is not None:
+                    operation, query, variables = control
+                    await self._send(self._subscribe(operation, query, variables, sub_id=sub_id))
             return []
 
         payload = (data.get("payload") or {}).get("data") or {}
@@ -285,6 +358,7 @@ class EventListener:
         return events
 
     async def poll_reviews_once(self) -> list[PlayerokEvent]:
+        await self._ensure_state_loaded()
         events: list[PlayerokEvent] = []
         for deal_id in list(self.review_deal_ids):
             if not self._should_check_review(deal_id):
@@ -293,6 +367,7 @@ class EventListener:
             if schema is None or schema.review is None:
                 continue
             self.review_deal_ids.remove(deal_id)
+            self._mark_state_dirty()
             deal = self.client.deals._create_deal(schema)
             chat = None
             if deal.chat_id:
@@ -302,9 +377,17 @@ class EventListener:
             if chat is None:
                 continue
             events.append(NewReviewEvent(client=self.client, chat=chat, deal=deal))
+        await self._save_state()
         return events
 
     async def events_for_message(self, chat, message: ChatMessageSchema) -> list[PlayerokEvent]:
+        await self._ensure_state_loaded()
+        try:
+            return await self._message_events(chat, message)
+        finally:
+            await self._save_state()
+
+    async def _message_events(self, chat, message: ChatMessageSchema) -> list[PlayerokEvent]:
         if not message.text:
             return []
         if message.id in self.processed_message_ids:
@@ -329,8 +412,10 @@ class EventListener:
             if deal_schema.id in self.processed_deal_ids:
                 return []
             self.processed_deal_ids.add(deal_schema.id)
+            self.known_deal_ids.add(deal_schema.id)
             if deal_schema.id not in self.review_deal_ids:
                 self.review_deal_ids.append(deal_schema.id)
+            self._mark_state_dirty()
 
         fetched = await self._refetch_deal(deal_schema.id)
         if fetched is not None:
@@ -355,6 +440,7 @@ class EventListener:
     ) -> AsyncIterator[PlayerokEvent]:
         if not messages and not reviews:
             return
+        await self._ensure_state_loaded()
 
         queue: asyncio.Queue[Any] = asyncio.Queue()
 
@@ -377,6 +463,7 @@ class EventListener:
                 self.known_chat_ids.add(chat_schema.id)
                 chat = self.client.chats._create_chat(chat_schema)
                 await queue.put(ChatInitializedEvent(client=self.client, chat=chat))
+            await self._save_state()
             tasks.append(asyncio.create_task(produce(self._socket_events())))
             tasks.append(asyncio.create_task(produce(self._new_chat_events())))
         if reviews:
@@ -400,6 +487,7 @@ class EventListener:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
         self._tasks.clear()
+        await self._save_state()
         ws = self._ws
         self._ws = None
         if ws is not None:
@@ -409,7 +497,9 @@ class EventListener:
     async def _socket_events(self) -> AsyncIterator[PlayerokEvent]:
         import websockets
 
+        delay = _WS_RECONNECT_INITIAL
         while not self._stop.is_set():
+            connected = False
             try:
                 connect = websockets.connect(
                     _WS_URL,
@@ -436,16 +526,62 @@ class EventListener:
                             data = json.loads(raw)
                         except json.JSONDecodeError:
                             continue
-                        for event in await self.handle_frame(data):
+                        events = await self.handle_frame(data)
+                        if data.get("type") == "connection_ack":
+                            connected = True
+                            if self._needs_resync:
+                                self._needs_resync = False
+                                events.extend(await self._resync())
+                        for event in events:
                             yield event
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.debug("WebSocket connection dropped", exc_info=True)
+            finally:
                 self._ws = None
-                if self._stop.is_set():
-                    break
-                await asyncio.sleep(3)
+
+            if self._stop.is_set():
+                break
+            if connected:
+                self._needs_resync = True
+                delay = _WS_RECONNECT_INITIAL
+            await asyncio.sleep(delay * random.uniform(0.5, 1.5))
+            delay = min(_WS_RECONNECT_MAX, delay * 2)
+
+    async def _resync(self) -> list[PlayerokEvent]:
+        """Pull recent chats after a reconnect: WS does not replay events missed during the gap."""
+        try:
+            page = await self.client._raw.chats.get_chats(
+                user_id=self.client.me_id, count=24, type=self._pm_type()
+            )
+        except Exception:
+            logger.warning("Playerok resync after reconnect failed", exc_info=True)
+            return []
+        if page is None:
+            return []
+
+        now = datetime.now(timezone.utc)
+        events: list[PlayerokEvent] = []
+        for chat_schema in page.chats:
+            try:
+                chat_schema = self.remember_chat(chat_schema)
+                chat = self.client.chats._create_chat(chat_schema)
+                if chat_schema.id not in self.known_chat_ids:
+                    self.known_chat_ids.add(chat_schema.id)
+                    await self._send(self._chat_message_frame(chat_schema.id))
+                    events.append(ChatInitializedEvent(client=self.client, chat=chat))
+                events.extend(await self._scan_recent_paid(chat_schema, now))
+                message = chat_schema.last_message
+                if message is not None:
+                    age = (now - _as_utc(message.created_at)).total_seconds()
+                    if age <= self.history_grace_seconds:
+                        events.extend(await self.events_for_message(chat, message))
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.debug("Playerok resync failed for chat %s", chat_schema.id, exc_info=True)
+        return events
 
     async def _new_chat_events(self) -> AsyncIterator[PlayerokEvent]:
         while not self._stop.is_set():
@@ -466,7 +602,20 @@ class EventListener:
                 logger.debug("New chat poll failed", exc_info=True)
 
     async def _review_events(self) -> AsyncIterator[PlayerokEvent]:
+        last_refresh = 0.0
         while not self._stop.is_set():
+            now = asyncio.get_running_loop().time()
+            if not self._deals_baseline_ready or (
+                self.review_refresh_interval
+                and now - last_refresh >= self.review_refresh_interval
+            ):
+                last_refresh = now
+                try:
+                    await self._refresh_known_deals()
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.debug("Deal refresh for review polling failed", exc_info=True)
             try:
                 for event in await self.poll_reviews_once():
                     yield event
@@ -478,6 +627,38 @@ class EventListener:
                 await asyncio.sleep(1)
             except asyncio.CancelledError:
                 raise
+
+    async def _refresh_known_deals(self) -> None:
+        """Track deals seen by the feed so review polling does not depend on message events."""
+        await self._ensure_state_loaded()
+        try:
+            await self._refresh_deals_from_feed()
+        finally:
+            await self._save_state()
+
+    async def _refresh_deals_from_feed(self) -> None:
+        response = await self.client._raw.deals.get_deals(
+            user_id=self.client.me_id, count=24
+        )
+        if response is None:
+            return
+
+        deal_ids = [schema.id for schema in response.deals]
+        if not self._deals_baseline_ready:
+            # Deals that already existed at startup are not "new"; their reviews
+            # (if any) must not be reported as fresh events.
+            self.known_deal_ids.update(deal_ids)
+            self._deals_baseline_ready = True
+            self._mark_state_dirty()
+            return
+
+        for deal_id in deal_ids:
+            if deal_id in self.known_deal_ids or deal_id in self.processed_deal_ids:
+                continue
+            self.known_deal_ids.add(deal_id)
+            if deal_id not in self.review_deal_ids:
+                self.review_deal_ids.append(deal_id)
+            self._mark_state_dirty()
 
     async def _on_chat_updated(self, data: dict[str, Any]) -> list[PlayerokEvent]:
         chat_schema = await self._named_schema(parse_chat(data))
@@ -543,6 +724,7 @@ class EventListener:
         if tries >= self.review_tries:
             if deal_id in self.review_deal_ids:
                 self.review_deal_ids.remove(deal_id)
+                self._mark_state_dirty()
             self.review_checks.pop(deal_id, None)
         return False
 
@@ -551,9 +733,99 @@ class EventListener:
             return
         self.processed_message_ids.add(message_id)
         self._processed_order.append(message_id)
-        while len(self._processed_order) > 300:
+        while len(self._processed_order) > self.processed_history_limit:
             oldest = self._processed_order.popleft()
             self.processed_message_ids.discard(oldest)
+        self._mark_state_dirty()
+
+    def _mark_state_dirty(self) -> None:
+        self._state_dirty = True
+        self._state_version += 1
+
+    async def _ensure_state_loaded(self) -> None:
+        if self.state is None or self._state_loaded:
+            return
+        user_id = self.client.me_id
+        if user_id is None:
+            return
+        self._state_loaded = True
+        self._state_key = f"playerok:{user_id}:listener"
+        try:
+            data = await self.state.get(self._state_key)
+        except Exception as exc:
+            logger.warning("Playerok state load failed: %s", exc)
+            return
+        if not isinstance(data, dict) or data.get("version") != 1:
+            return
+        try:
+            self._restore_state(data)
+        except (TypeError, ValueError) as exc:
+            logger.warning("Playerok state is malformed, starting fresh: %s", exc)
+            self._reset_state()
+        else:
+            self._state_dirty = False
+
+    def _restore_state(self, data: dict[str, Any]) -> None:
+        messages = self._string_list(data.get("messages"), "messages")
+        messages = list(dict.fromkeys(messages))[-self.processed_history_limit :]
+        processed_deals = self._string_list(data.get("processed_deals"), "processed_deals")
+        known_deals = self._string_list(data.get("known_deals"), "known_deals")
+        review_deals = self._string_list(data.get("review_deals"), "review_deals")
+        deals_ready = bool(data.get("deals_ready"))
+
+        self.processed_message_ids = set(messages)
+        self._processed_order = deque(messages)
+        self.processed_deal_ids = set(processed_deals)
+        self.known_deal_ids = set(known_deals)
+        self.review_deal_ids = list(dict.fromkeys(review_deals))
+        self._deals_baseline_ready = deals_ready
+        if messages or known_deals:
+            # Recover messages missed while the process was down, the same way
+            # a websocket reconnect does.
+            self._needs_resync = True
+
+    def _reset_state(self) -> None:
+        self.processed_message_ids.clear()
+        self._processed_order.clear()
+        self.processed_deal_ids.clear()
+        self.known_deal_ids.clear()
+        self.review_deal_ids.clear()
+        self._deals_baseline_ready = False
+        self._state_dirty = False
+
+    @staticmethod
+    def _string_list(raw: Any, field: str) -> list[str]:
+        if raw is None:
+            return []
+        if not isinstance(raw, list):
+            raise ValueError(f"{field} must be a list")
+        return [str(item) for item in raw]
+
+    def _snapshot(self) -> dict[str, Any]:
+        return {
+            "version": 1,
+            "messages": list(self._processed_order),
+            "processed_deals": list(self.processed_deal_ids),
+            "known_deals": list(self.known_deal_ids),
+            "review_deals": list(self.review_deal_ids),
+            "deals_ready": self._deals_baseline_ready,
+        }
+
+    async def _save_state(self) -> None:
+        if self.state is None or not self._state_dirty or self._state_key is None:
+            return
+        async with self._state_lock:
+            if not self._state_dirty:
+                return
+            version = self._state_version
+            snapshot = self._snapshot()
+            try:
+                await self.state.set(self._state_key, snapshot)
+            except Exception as exc:
+                logger.warning("Playerok state save failed: %s", exc)
+                return
+            if version == self._state_version:
+                self._state_dirty = False
 
     def _subscribe(
         self, operation: str, query: str, variables: dict[str, Any], *, sub_id: str | None = None
@@ -568,6 +840,16 @@ class EventListener:
                 "variables": variables,
             },
         }
+
+    def _control_frame(
+        self, operation: str, query: str, variables: dict[str, Any]
+    ) -> dict[str, Any]:
+        for sub_id, (known_op, _, _) in self._control_subscriptions.items():
+            if known_op == operation:
+                return self._subscribe(operation, query, variables, sub_id=sub_id)
+        sub_id = str(uuid.uuid4())
+        self._control_subscriptions[sub_id] = (operation, query, variables)
+        return self._subscribe(operation, query, variables, sub_id=sub_id)
 
     def _chat_message_frame(self, chat_id: str) -> dict[str, Any]:
         for sub_id, known in self.chat_subscriptions.items():

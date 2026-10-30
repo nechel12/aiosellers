@@ -5,9 +5,7 @@ from typing import TYPE_CHECKING, AsyncIterator
 from ..core.types import ImageInput
 from ..entities.game import GameCategoryDataField, GameCategoryOption
 from ..entities.item import Item, MyItem
-from ..schemas import ItemsSortOptions
-from ..schemas.items import Item as ItemSchema
-from ..schemas.items import MyItem as MyItemSchema
+from ..schemas import ItemsSortOptions, PriorityTypes
 
 if TYPE_CHECKING:
     from ..playerok import Playerok
@@ -17,25 +15,69 @@ class ItemAPI:
     def __init__(self, client: Playerok) -> None:
         self._client = client
 
+    @staticmethod
+    def _schema_value(schema, *names, default=None):
+        for name in names:
+            if hasattr(schema, name):
+                return getattr(schema, name)
+        return default
+
+    @classmethod
+    def _base_values(cls, schema) -> dict:
+        user = cls._schema_value(schema, "user")
+        return {
+            "id": schema.id,
+            "slug": cls._schema_value(schema, "slug"),
+            "name": cls._schema_value(schema, "name"),
+            "description": cls._schema_value(schema, "description"),
+            "price": cls._schema_value(schema, "price"),
+            "status": cls._schema_value(schema, "status"),
+            "priority": cls._schema_value(schema, "priority"),
+            "game_id": cls._schema_value(schema, "game_id"),
+            "category_id": cls._schema_value(schema, "category_id"),
+            "obtaining_type_id": cls._schema_value(schema, "obtaining_type_id"),
+            "user_id": getattr(user, "id", None) if user is not None else None,
+        }
+
+    @classmethod
+    def _my_values(cls, schema) -> dict:
+        return {
+            "prev_price": cls._schema_value(schema, "prev_price", "raw_price"),
+            "priority_price": cls._schema_value(schema, "priority_price"),
+            "priority_position": cls._schema_value(schema, "priority_position"),
+            "is_editable": cls._schema_value(schema, "is_editable"),
+            "buyer": cls._schema_value(schema, "buyer"),
+        }
+
+    @classmethod
+    def _apply_schema(cls, item: Item, schema) -> None:
+        for name, value in cls._base_values(schema).items():
+            if value is not None:
+                setattr(item, name, value)
+
+        if not isinstance(item, MyItem):
+            return
+        if hasattr(schema, "prev_price") and schema.prev_price is not None:
+            item.prev_price = schema.prev_price
+        elif hasattr(schema, "raw_price") and schema.raw_price is not None:
+            item.prev_price = schema.raw_price
+        for name in ("priority_price", "priority_position", "is_editable", "buyer"):
+            value = getattr(schema, name, None)
+            if value is not None:
+                setattr(item, name, value)
+
     def _create_item(self, schema) -> Item:
-        if self._client._use_identity_map and hasattr(schema, "id"):
-            cached = self._client._identity_maps.items.get(schema.id)
-            if cached:
+        item_id = self._schema_value(schema, "id")
+        if not item_id:
+            raise ValueError("Item schema does not contain an id")
+
+        if self._client._use_identity_map:
+            cached = self._client._identity_maps.items.get(item_id)
+            if cached is not None:
+                self._apply_schema(cached, schema)
                 return cached
 
-        item = Item(
-            id=schema.id,
-            slug=schema.slug,
-            name=schema.name,
-            description=schema.description,
-            price=schema.price,
-            status=schema.status,
-            priority=schema.priority,
-            game_id=getattr(schema, "game_id", None),
-            category_id=getattr(schema, "category_id", None),
-            obtaining_type_id=getattr(schema, "obtaining_type_id", None),
-            user_id=schema.user.id if schema.user else None,
-        )
+        item = Item(**self._base_values(schema))
         item._client = self._client
 
         if self._client._use_identity_map:
@@ -44,51 +86,22 @@ class ItemAPI:
         return item
 
     def _create_my_item(self, schema) -> MyItem:
-        if self._client._use_identity_map and hasattr(schema, "id"):
-            cached = self._client._identity_maps.items.get(schema.id)
-            if cached:
+        item_id = self._schema_value(schema, "id")
+        if not item_id:
+            raise ValueError("Item schema does not contain an id")
+
+        if self._client._use_identity_map:
+            cached = self._client._identity_maps.items.get(item_id)
+            if isinstance(cached, MyItem):
+                self._apply_schema(cached, schema)
                 return cached
 
-        if type(schema) is ItemSchema:
-            item = MyItem(
-                id=schema.id,
-                slug=schema.slug,
-                name=schema.name,
-                description=schema.description,
-                price=schema.price,
-                prev_price=schema.raw_price,
-                status=schema.status,
-                priority=schema.priority,
-                priority_position=schema.priority_position,
-                game_id=getattr(schema, "game_id", None),
-                category_id=getattr(schema, "category_id", None),
-                obtaining_type_id=getattr(schema, "obtaining_type_id", None),
-                user_id=schema.user.id if schema.user else None,
-            )
-        elif type(schema) is MyItemSchema:
-            item = MyItem(
-                id=schema.id,
-                slug=schema.slug,
-                name=schema.name,
-                description=schema.description,
-                price=schema.price,
-                status=schema.status,
-                priority=schema.priority,
-                game_id=getattr(schema, "game_id", None),
-                category_id=getattr(schema, "category_id", None),
-                obtaining_type_id=getattr(schema, "obtaining_type_id", None),
-                user_id=schema.user.id if schema.user else None,
-                prev_price=schema.prev_price,
-                priority_price=schema.priority_price,
-                priority_position=schema.priority_position,
-                is_editable=schema.is_editable,
-                buyer=schema.buyer,
-            )
-
-            if self._client._use_identity_map:
-                self._client._identity_maps.items.set(item.id, item)
-
+        item = MyItem(**self._base_values(schema), **self._my_values(schema))
         item._client = self._client
+
+        if self._client._use_identity_map:
+            self._client._identity_maps.items.set(item.id, item)
+
         return item
 
     def _extract_options(
@@ -118,7 +131,11 @@ class ItemAPI:
         return result if result else None
 
     async def _get_priority_statuses(self, item_id: str, price: int):
-        return await self._client._raw.items.get_item_priority_statuses(item_id, price)
+        return await self._client._require_raw().items.get_item_priority_statuses(item_id, price)
+
+    @staticmethod
+    def _priority_by_type(statuses, priority_type: PriorityTypes):
+        return next((status for status in statuses if status.type == priority_type), None)
 
     async def get(
         self, id: str | None = None, *, slug: str | None = None, force_refresh: bool = False
@@ -128,7 +145,7 @@ class ItemAPI:
             if cached:
                 return cached
 
-        schema = await self._client._raw.items.get_item(id, slug)
+        schema = await self._client._require_raw().items.get_item(id, slug)
         if schema is None:
             return None
 
@@ -155,7 +172,7 @@ class ItemAPI:
         current_cursor = cursor
 
         while remain > 0:
-            response = await self._client._raw.items.get_items(
+            response = await self._client._require_raw().items.get_items(
                 count=min(24, remain),
                 cursor=current_cursor,
                 game_id=game_id,
@@ -201,7 +218,7 @@ class ItemAPI:
         current_cursor = cursor
 
         while True:
-            response = await self._client._raw.items.get_items(
+            response = await self._client._require_raw().items.get_items(
                 cursor=current_cursor,
                 game_id=game_id,
                 user_id=user_id,
@@ -230,7 +247,7 @@ class ItemAPI:
         current_cursor = cursor
 
         while remain > 0:
-            response = await self._client._raw.items.get_items(
+            response = await self._client._require_raw().items.get_items(
                 count=min(24, remain),
                 cursor=current_cursor,
                 user_id=self._client._me_id,
@@ -253,7 +270,7 @@ class ItemAPI:
         current_cursor = cursor
 
         while True:
-            response = await self._client._raw.items.get_items(
+            response = await self._client._require_raw().items.get_items(
                 cursor=current_cursor,
                 user_id=self._client._me_id,
             )
@@ -286,7 +303,7 @@ class ItemAPI:
         options_dict = self._extract_options(options)
         data_fields_dict = self._extract_data_fields(data_fields)
 
-        schema = await self._client._raw.items.create_item(
+        schema = await self._client._require_raw().items.create_item(
             game_category_id=category_id,
             obtaining_type_id=obtaining_type_id,
             name=name,
@@ -316,7 +333,7 @@ class ItemAPI:
         options_dict = self._extract_options(options)
         data_fields_dict = self._extract_data_fields(data_fields)
 
-        schema = await self._client._raw.items.update_item(
+        schema = await self._client._require_raw().items.update_item(
             id=item_id,
             name=name,
             price=price,
@@ -332,7 +349,7 @@ class ItemAPI:
         return self._create_my_item(schema)
 
     async def remove(self, item_id: str) -> bool:
-        return await self._client._raw.items.remove_item(item_id)
+        return await self._client._require_raw().items.remove_item(item_id)
 
     async def publish(self, item_id: str, *, premium: bool = False) -> MyItem | None:
         item = await self.get(item_id)
@@ -341,16 +358,12 @@ class ItemAPI:
 
         statuses = await self._get_priority_statuses(item_id, item.price)
 
-        if premium:
-            if not statuses:
-                raise ValueError("No premium priority available for this item")
-            priority_status = statuses[0]
-        else:
-            if not statuses:
-                raise ValueError("No normal priority available for this item")
-            priority_status = statuses[-1]
+        wanted = PriorityTypes.PREMIUM if premium else PriorityTypes.DEFAULT
+        priority_status = self._priority_by_type(statuses, wanted)
+        if priority_status is None:
+            raise ValueError(f"No {wanted.value.lower()} priority available for this item")
 
-        schema = await self._client._raw.items.publish_item(
+        schema = await self._client._require_raw().items.publish_item(
             item_id=item_id,
             priority_status_id=priority_status.id,
         )
@@ -366,11 +379,11 @@ class ItemAPI:
 
         statuses = await self._get_priority_statuses(item_id, item.price)
 
-        if not statuses:
-            raise ValueError("No normal priority available for this item")
-        priority_status = statuses[-1]
+        priority_status = self._priority_by_type(statuses, PriorityTypes.DEFAULT)
+        if priority_status is None:
+            raise ValueError("No default priority available for this item")
 
-        schema = await self._client._raw.items.increase_item_priority_status(
+        schema = await self._client._require_raw().items.increase_item_priority_status(
             item_id=item_id,
             priority_status_id=priority_status.id,
         )
@@ -386,11 +399,11 @@ class ItemAPI:
 
         statuses = await self._get_priority_statuses(item_id, item.price)
 
-        if not statuses:
+        priority_status = self._priority_by_type(statuses, PriorityTypes.PREMIUM)
+        if priority_status is None:
             raise ValueError("No premium priority available for this item")
-        priority_status = statuses[0]
 
-        schema = await self._client._raw.items.increase_item_priority_status(
+        schema = await self._client._require_raw().items.increase_item_priority_status(
             item_id=item_id,
             priority_status_id=priority_status.id,
         )

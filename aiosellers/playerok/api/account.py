@@ -14,11 +14,11 @@ class AccountAPI:
         self._client = client
 
     async def me(self) -> Account:
-        return await self._client._raw.account.get_me()
+        return await self._client._require_raw().account.get_me()
 
     async def profile(self) -> AccountProfile:
         me = await self.me()
-        return await self._client._raw.account.get_account(me.username)
+        return await self._client._require_raw().account.get_account(me.username)
 
     async def get_user(
         self,
@@ -35,7 +35,7 @@ class AccountAPI:
             if cached:
                 return cached
 
-        profile = await self._client._raw.account.get_user(id=user_id, username=username)
+        profile = await self._client._require_raw().account.get_user(id=user_id, username=username)
         if profile is None:
             if user_id:
                 # Create stub user with just ID
@@ -80,7 +80,7 @@ class AccountAPI:
         remain = limit
         current_cursor = cursor
         while remain > 0:
-            response = await self._client._raw.account.get_reviews(
+            response = await self._client._require_raw().account.get_reviews(
                 self._client._me_id,
                 count=min(24, remain),
                 after_cursor=current_cursor,

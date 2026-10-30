@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, AsyncIterator
 
+from ..core.exceptions import MessageNotDeliveredError
 from ..core.types import ImageInput
 from ..entities.chat import Chat, ChatMessage
 from ..entities.file import File
@@ -54,7 +55,7 @@ class ChatMessagesAPI:
         current_cursor = cursor
 
         while remain > 0:
-            response = await self._client._raw.chats.get_chat_messages(
+            response = await self._client._require_raw().chats.get_chat_messages(
                 chat_id=chat_id, count=min(50, remain), after_cursor=current_cursor
             )
             if response is None or not response.messages:
@@ -75,7 +76,7 @@ class ChatMessagesAPI:
         current_cursor = cursor
 
         while True:
-            response = await self._client._raw.chats.get_chat_messages(
+            response = await self._client._require_raw().chats.get_chat_messages(
                 chat_id=chat_id, after_cursor=current_cursor
             )
             if response is None or not response.messages:
@@ -131,7 +132,7 @@ class ChatAPI:
             if cached:
                 return cached
 
-        schema = await self._client._raw.chats.get_chat(chat_id)
+        schema = await self._client._require_raw().chats.get_chat(chat_id)
         if schema is None:
             return None
 
@@ -157,7 +158,7 @@ class ChatAPI:
         current_cursor = cursor
 
         while remain > 0:
-            response = await self._client._raw.chats.get_chats(
+            response = await self._client._require_raw().chats.get_chats(
                 user_id=self._client._me_id,
                 count=min(24, remain),
                 cursor=current_cursor,
@@ -206,7 +207,7 @@ class ChatAPI:
         current_cursor = cursor
 
         while True:
-            response = await self._client._raw.chats.get_chats(
+            response = await self._client._require_raw().chats.get_chats(
                 user_id=self._client._me_id,
                 cursor=current_cursor,
                 type=type,
@@ -244,17 +245,19 @@ class ChatAPI:
         if text is None and photo is None:
             raise ValueError("Either text or photo must be provided")
 
-        msg = await self._client._raw.chats.send_message(
+        msg = await self._client._require_raw().chats.send_message(
             chat_id=chat_id,
             text=text,
             photo=photo,
             mark_as_read=mark_as_read,
         )
+        if msg is None:
+            raise MessageNotDeliveredError(f"Playerok did not return a message for chat {chat_id}")
 
         return self.messages._create_message(msg, chat_id)
 
     async def mark_as_read(self, chat_id: str) -> None:
-        await self._client._raw.chats.mark_chat_as_read(chat_id)
+        await self._client._require_raw().chats.mark_chat_as_read(chat_id)
 
     async def message_templates(
         self,
@@ -267,7 +270,7 @@ class ChatAPI:
         remain = limit
         current_cursor = cursor
         while remain > 0:
-            response = await self._client._raw.chats.get_message_templates(
+            response = await self._client._require_raw().chats.get_message_templates(
                 template_type, count=min(24, remain), after_cursor=current_cursor
             )
             if response is None or not response.templates:
@@ -282,4 +285,4 @@ class ChatAPI:
         return result[:limit]
 
     async def upload_image(self, chat_id: str, image: ImageInput) -> TemporaryAttachment | None:
-        return await self._client._raw.chats.upload_image(chat_id, image)
+        return await self._client._require_raw().chats.upload_image(chat_id, image)

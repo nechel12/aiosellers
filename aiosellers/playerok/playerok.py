@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 from collections.abc import Awaitable, Callable
@@ -67,6 +68,7 @@ class Playerok:
         self._raw: RawAPI | None = None
         self._use_identity_map = config.use_identity_map
         self._me_id: str | None = None
+        self._polling_task: asyncio.Task | None = None
 
         if self._use_identity_map:
             self._identity_maps = _IdentityMaps(
@@ -91,6 +93,11 @@ class Playerok:
     def me_id(self) -> str | None:
         return self._me_id
 
+    def _require_raw(self) -> RawAPI:
+        if self._raw is None or self._transport is None:
+            raise RuntimeError("Client is not started. Call start() or start_polling() first.")
+        return self._raw
+
     async def __aenter__(self) -> Playerok:
         await self.start()
         return self
@@ -103,7 +110,7 @@ class Playerok:
         if self._transport is not None:
             return
 
-        self._transport = PlayerokTransport(
+        transport = PlayerokTransport(
             access_token=self._config.access_token,
             config=PlayerokConfig(
                 user_agent=self._config.user_agent,
@@ -111,9 +118,15 @@ class Playerok:
                 base_url=self._config.base_url,
             ),
         )
-        self._raw = RawAPI(self._transport)
+        raw = RawAPI(transport)
+        try:
+            me = await raw.account.get_me()
+        except BaseException:
+            await transport.close()
+            raise
 
-        me = await self._raw.account.get_me()
+        self._transport = transport
+        self._raw = raw
         self._me_id = me.id
 
     async def close(self) -> None:
@@ -141,16 +154,28 @@ class Playerok:
         """Low-level event stream. The client must already be started."""
         if self._transport is None:
             raise RuntimeError("Client is not started. Call start() or start_polling() first.")
+        listener_options.setdefault("state", self._config.state)
         return EventListener(self, **listener_options).listen(messages=messages, reviews=reviews)
 
     async def start_polling(self, *, messages: bool = True, reviews: bool = True) -> None:
-        """Start the session, dispatch decorator handlers, and close on exit."""
+        """Start the session, dispatch decorator handlers, and close on exit.
+
+        Another task can stop the loop with :meth:`stop`.
+        """
         await self.start()
+        self._polling_task = asyncio.current_task()
         try:
             async for event in self.listen(messages=messages, reviews=reviews):
                 await self._dispatch(event)
         finally:
+            self._polling_task = None
             await self.close()
+
+    def stop(self) -> None:
+        """Stop the loop started by :meth:`start_polling` from another task."""
+        task = self._polling_task
+        if task is not None and task is not asyncio.current_task() and not task.done():
+            task.cancel()
 
     def on(
         self,
@@ -234,6 +259,7 @@ class Playerok:
     async def _dispatch(self, event: PlayerokEvent) -> None:
         if event.type is EventTypes.CHAT_INITIALIZED:
             return
+        handlers: list[_Handler] = []
         for handler in list(self._handlers):
             if handler.event_type != event.type:
                 continue
@@ -254,7 +280,24 @@ class Playerok:
                 except Exception:
                     logger.exception("Event filter failed")
                     continue
-            try:
-                await handler.fn(event)
-            except Exception:
-                logger.exception("Event handler failed")
+            handlers.append(handler)
+        if not handlers:
+            return
+
+        timeout = self._config.handler_timeout
+        limit = asyncio.Semaphore(max(1, self._config.max_concurrent_handlers))
+
+        async def run(handler: _Handler) -> None:
+            async with limit:
+                try:
+                    coro = handler.fn(event)
+                    if timeout is not None and timeout > 0:
+                        await asyncio.wait_for(coro, timeout)
+                    else:
+                        await coro
+                except TimeoutError:
+                    logger.warning("Event handler timed out after %s seconds", timeout)
+                except Exception:
+                    logger.exception("Event handler failed")
+
+        await asyncio.gather(*(run(handler) for handler in handlers))
