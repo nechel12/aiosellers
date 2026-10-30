@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from urllib.parse import urlencode
 
-from ..core.constants import BOT_MARK
 from ..exceptions import FeedbackEditingError, RefundError, RequestFailedError
 from ..parsers.orders import parse_order_api, parse_order_list
 from ..schemas import OrderSide
@@ -98,7 +97,7 @@ class RawOrders(RawBase):
                 "orders/review",
                 data={
                     "authorId": self.transport.account_id,
-                    "text": f"{text}{BOT_MARK}" if text else "",
+                    "text": f"{text}{self.bot_mark}" if text else "",
                     "rating": rating if rating is not None else "",
                     "orderId": order_id,
                 },

@@ -35,7 +35,10 @@ class _Raw:
         self.payloads: list[dict] = []
         self.history_calls: list[tuple] = []
         self.history_result: list[MessageSnapshot] = []
+        self.history_pages: dict[int, list[MessageSnapshot]] = {}
+        self.history_error: Exception | None = None
         self.sales_pages: list[tuple] = []
+        self.sales_calls: list = []
 
     async def runner_poll(self, objects, request=None):
         del objects, request
@@ -48,10 +51,17 @@ class _Raw:
     async def history(self, chat_id, last_message_id, retry=True):
         del retry
         self.history_calls.append((chat_id, last_message_id))
+        if self.history_error is not None:
+            error = self.history_error
+            self.history_error = None
+            raise error
+        if self.history_pages:
+            return list(self.history_pages.pop(last_message_id, []))
         return list(self.history_result)
 
     async def sales(self, cursor=None, query=None, retry=True):
-        del cursor, query, retry
+        del query, retry
+        self.sales_calls.append(cursor)
         return self.sales_pages.pop(0)
 
     async def purchases(self, cursor=None, retry=True):
@@ -79,13 +89,35 @@ def _listener() -> tuple[FunPay, EventListener, _Raw]:
     return client, EventListener(client), raw
 
 
-def _runner(html: str) -> dict:
+def _runner(html: str, *, buyer: int = 1, seller: int = 2) -> dict:
     return {
         "objects": [
             {"type": "chat_bookmarks", "tag": "chat-tag", "data": html},
-            {"type": "orders_counters", "tag": "order-tag", "data": {"buyer": 1, "seller": 2}},
+            {"type": "orders_counters", "tag": "order-tag", "data": {"buyer": buyer, "seller": seller}},
         ]
     }
+
+
+def _snap(message_id: int, text: str = "text") -> MessageSnapshot:
+    return MessageSnapshot(
+        id=message_id,
+        text=text,
+        chat_id=3,
+        chat_name="Ann",
+        author="Ann",
+        author_id=9,
+        interlocutor_id=9,
+        image_link=None,
+        image_name=None,
+        type=MessageTypes.NON_SYSTEM,
+        by_bot=False,
+        badge=None,
+        is_support=False,
+        is_moderation=False,
+        is_arbitration=False,
+        is_auto_reply=False,
+        html="",
+    )
 
 
 class FunPayEventTests(unittest.IsolatedAsyncioTestCase):
@@ -134,7 +166,7 @@ class FunPayEventTests(unittest.IsolatedAsyncioTestCase):
         await listener.tick(orders=False, purchases=False)
         self.assertEqual(raw.history_calls, [(3, 13)])
 
-    async def test_order_diff_and_oversized_page(self) -> None:
+    async def test_order_diff_follows_counters_and_large_pages(self) -> None:
         _client, listener, raw = _listener()
         raw.payloads.append(_runner(""))
         raw.sales_pages.append(
@@ -143,7 +175,13 @@ class FunPayEventTests(unittest.IsolatedAsyncioTestCase):
         first = await listener.tick(messages=False, purchases=False)
         self.assertEqual([event.type for event in first], [EventTypes.INITIAL_ORDER])
 
+        # Unchanged counters: the order list is not fetched again.
         raw.payloads.append(_runner(""))
+        unchanged = await listener.tick(messages=False, purchases=False)
+        self.assertEqual(unchanged, [])
+        self.assertEqual(raw.sales_calls, [None])
+
+        raw.payloads.append(_runner("", seller=3))
         raw.sales_pages.append(
             parse_order_list(_order_row("ABCD1235", "info"), side=OrderSide.SALE)
         )
@@ -156,7 +194,7 @@ class FunPayEventTests(unittest.IsolatedAsyncioTestCase):
             parse_order_list(_order_row("ABCD1234", "info"), side=OrderSide.SALE)
         )
         await listener2.tick(messages=False, purchases=False)
-        raw2.payloads.append(_runner(""))
+        raw2.payloads.append(_runner("", seller=3))
         raw2.sales_pages.append(parse_order_list(_order_row("ABCD1234", ""), side=OrderSide.SALE))
         changed = await listener2.tick(messages=False, purchases=False)
         kinds = [event.type for event in changed]
@@ -170,16 +208,63 @@ class FunPayEventTests(unittest.IsolatedAsyncioTestCase):
         )
         await listener3.tick(messages=False, purchases=False)
         wide = "".join(_order_row(f"A{index:07d}", "info") for index in range(101))
-        raw3.payloads.append(_runner(""))
+        raw3.payloads.append(_runner("", seller=3))
         raw3.sales_pages.append(parse_order_list(wide, side=OrderSide.SALE))
-        skipped = await listener3.tick(messages=False, purchases=False)
-        diff = {
-            EventTypes.NEW_ORDER,
-            EventTypes.ORDER_STATUS_CHANGED,
-            EventTypes.ORDER_CLOSED,
-            EventTypes.ORDER_REFUNDED,
-        }
-        self.assertFalse(diff.intersection(event.type for event in skipped))
+        large = await listener3.tick(messages=False, purchases=False)
+        self.assertEqual(
+            [event.type for event in large].count(EventTypes.NEW_ORDER), 101
+        )
+
+    async def test_order_pagination_reads_all_pages(self) -> None:
+        _client, listener, raw = _listener()
+        raw.payloads.append(_runner(""))
+        first_page = (
+            _order_row("ABCD1234", "info")
+            + '<input type="hidden" name="continue" value="next-page">'
+        )
+        raw.sales_pages.append(parse_order_list(first_page, side=OrderSide.SALE))
+        raw.sales_pages.append(
+            parse_order_list(_order_row("ABCD1235", "info"), side=OrderSide.SALE)
+        )
+
+        events = await listener.tick(messages=False, purchases=False)
+
+        self.assertEqual(raw.sales_calls, [None, "next-page"])
+        self.assertEqual(
+            [event.order.id for event in events if event.type is EventTypes.INITIAL_ORDER],
+            ["ABCD1234", "ABCD1235"],
+        )
+
+    async def test_chat_history_failure_keeps_cursor(self) -> None:
+        _client, listener, raw = _listener()
+        raw.payloads.append(_runner(BOOKMARK.format(node=10, text="hi")))
+        await listener.tick(orders=False, purchases=False)
+
+        raw.history_error = RuntimeError("boom")
+        raw.payloads.append(_runner(BOOKMARK.format(node=11, text="hey")))
+        failed = await listener.tick(orders=False, purchases=False)
+        self.assertNotIn(EventTypes.NEW_MESSAGE, [event.type for event in failed])
+        self.assertEqual(listener._chats[3][0], 10)
+
+        raw.history_result = [_snap(11, "hey")]
+        raw.payloads.append(_runner(BOOKMARK.format(node=11, text="hey")))
+        retried = await listener.tick(orders=False, purchases=False)
+        self.assertIn(EventTypes.NEW_MESSAGE, [event.type for event in retried])
+        self.assertEqual(raw.history_calls[-1], (3, 12))
+        self.assertEqual(listener._chats[3][0], 11)
+
+    async def test_chat_history_reads_all_pages_of_the_gap(self) -> None:
+        _client, listener, raw = _listener()
+        raw.payloads.append(_runner(BOOKMARK.format(node=10, text="hi")))
+        await listener.tick(orders=False, purchases=False)
+
+        raw.payloads.append(_runner(BOOKMARK.format(node=13, text="new")))
+        raw.history_pages = {14: [_snap(12), _snap(13)], 12: [_snap(10), _snap(11)]}
+        events = await listener.tick(orders=False, purchases=False)
+
+        self.assertEqual(raw.history_calls, [(3, 14), (3, 12)])
+        ids = [event.message.id for event in events if event.type is EventTypes.NEW_MESSAGE]
+        self.assertEqual(ids, [11, 12, 13])
 
     async def test_handlers_text_and_review_stars(self) -> None:
         client = FunPay(FunPayClientConfig(golden_key="key"))

@@ -5,7 +5,6 @@ from typing import Literal
 
 from bs4 import BeautifulSoup
 
-from ..core.constants import BOT_MARK
 from ..exceptions import ImageUploadError, MessageNotDeliveredError, RequestFailedError
 from ..parsers.chats import parse_history
 from ..transport.tls import response_json, response_text
@@ -84,7 +83,7 @@ class RawChats(RawBase):
             request["data"]["content"] = ""
             request["data"]["image_id"] = image_id
         elif text:
-            request["data"]["content"] = f"{BOT_MARK}{text}"
+            request["data"]["content"] = f"{self.bot_mark}{text}"
 
         async def run():
             before = await self._node_message_id(chat_id)

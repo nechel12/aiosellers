@@ -16,6 +16,8 @@ class FunPayConfig:
     locale: Literal["ru", "en", "uk"] | None
     proxy: str | None
     session_refresh_seconds: float
+    max_concurrent_requests: int = 4
+    bot_mark: bool = True
 
     @classmethod
     def from_client(cls, config) -> FunPayConfig:
@@ -33,4 +35,6 @@ class FunPayConfig:
             locale=config.locale,
             proxy=config.proxy,
             session_refresh_seconds=config.session_refresh_seconds,
+            max_concurrent_requests=max(1, getattr(config, "max_concurrent_requests", 4)),
+            bot_mark=bool(getattr(config, "bot_mark", True)),
         )

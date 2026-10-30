@@ -125,8 +125,6 @@ class ChatAPI:
             html = data.get("html") if isinstance(data, dict) else (data or "")
             break
         shortcuts = parse_bookmarks(html if isinstance(html, str) else "", self_id=account_id)
-        if self._client._use_identity_map:
-            self._client._identity_maps.chats.clear()
         return [self._from_shortcut(shortcut) for shortcut in shortcuts]
 
     async def get(self, chat_id: int, *, force_refresh: bool = False) -> Chat:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import random
 import re
 import time
 from typing import Any
@@ -15,6 +16,12 @@ from ..exceptions import RateLimitedError, RequestFailedError, UnauthorizedError
 from ..parsers.home import parse_home
 
 _LOGIN = "account/login"
+_REQUEST_ATTEMPTS = 3
+_RETRYABLE_STATUSES = frozenset({500, 502, 503, 504})
+
+
+def _backoff(attempt: int) -> float:
+    return min(8.0, 0.5 * (2**attempt)) + random.uniform(0, 0.1)
 
 
 def response_json(response: Any) -> Any:
@@ -54,7 +61,7 @@ class FunPayTransport:
         self.currency = None
         self.last_refresh: float = 0.0
         self.rate_limited_until: float = 0.0
-        self._lock = asyncio.Lock()
+        self._limiter = asyncio.Semaphore(max(1, self._config.max_concurrent_requests))
         signature = inspect.signature(AsyncClient.__init__)
         kwargs: dict[str, Any] = {
             "cookies": {"golden_key": self._config.golden_key, "cookie_prefs": "1"},
@@ -113,19 +120,49 @@ class FunPayTransport:
         locale: str | None = None,
         raise_not_200: bool = True,
     ) -> Any:
-        async with self._lock:
-            return await self._exchange(
-                method,
-                path,
-                data=data,
-                json_body=json_body,
-                headers=headers,
-                locale=locale,
-                raise_not_200=raise_not_200,
-            )
+        async with self._limiter:
+            if method.upper() != "GET":
+                return await self._exchange(
+                    method,
+                    path,
+                    data=data,
+                    json_body=json_body,
+                    headers=headers,
+                    locale=locale,
+                    raise_not_200=raise_not_200,
+                )
+
+            last_error: Exception | None = None
+            for attempt in range(_REQUEST_ATTEMPTS):
+                try:
+                    return await self._exchange(
+                        method,
+                        path,
+                        data=data,
+                        json_body=json_body,
+                        headers=headers,
+                        locale=locale,
+                        raise_not_200=raise_not_200,
+                    )
+                except (UnauthorizedError, RateLimitedError):
+                    raise
+                except RequestFailedError as exc:
+                    if (
+                        exc.status_code not in _RETRYABLE_STATUSES
+                        or attempt + 1 >= _REQUEST_ATTEMPTS
+                    ):
+                        raise
+                    last_error = exc
+                except Exception as exc:
+                    if attempt + 1 >= _REQUEST_ATTEMPTS:
+                        raise
+                    last_error = exc
+                await asyncio.sleep(_backoff(attempt))
+
+            raise RequestFailedError(f"GET {path} failed after retries") from last_error
 
     async def upload(self, path: str, filename: str, content: bytes, content_type: str) -> Any:
-        async with self._lock:
+        async with self._limiter:
             return await self._exchange(
                 "POST",
                 path,
@@ -291,7 +328,12 @@ class FunPayTransport:
         if code == 403 or _is_login(response):
             raise UnauthorizedError("unauthorized", status_code=code, body=text)
         if code == 429:
-            self.rate_limited_until = time.monotonic() + 60
+            retry_after = _header_text(getattr(response, "headers", None), "retry-after")
+            try:
+                delay = max(1.0, float(retry_after))
+            except (TypeError, ValueError):
+                delay = 60.0
+            self.rate_limited_until = time.monotonic() + min(300.0, delay)
             raise RateLimitedError("rate limited", status_code=code, body=text)
         if raise_not_200 and code not in (None, 200):
             raise RequestFailedError(f"HTTP {code}", status_code=code, body=text)

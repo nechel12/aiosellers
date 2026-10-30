@@ -1,7 +1,13 @@
+import json
 import unittest
+from types import SimpleNamespace
 
+from aiosellers.funpay.client_config import FunPayClientConfig
+from aiosellers.funpay.core.config import FunPayConfig
+from aiosellers.funpay.core.constants import BOT_MARK
 from aiosellers.funpay.exceptions import MessageNotDeliveredError
 from aiosellers.funpay.raw.chats import RawChats
+from aiosellers.funpay.raw.orders import RawOrders
 
 BOOKMARK = """
 <a class="contact-item" data-id="3" data-node-msg="{node}" data-user-msg="9">
@@ -23,9 +29,11 @@ class _Transport:
     account_id = 5
     username = "me"
 
-    def __init__(self, pages: list[dict]) -> None:
+    def __init__(self, pages: list[dict], *, bot_mark: bool = True) -> None:
         self.pages = pages
         self.gets = 0
+        self.contents: list[str] = []
+        self._config = SimpleNamespace(bot_mark=bot_mark)
 
     async def refresh_profile(self) -> None:
         return None
@@ -56,6 +64,7 @@ class _Transport:
         data = kwargs.get("data") or {}
         request = data.get("request") or ""
         if "chat_message" in request:
+            self.contents.append(json.loads(request)["data"]["content"])
             return _Response({"objects": [], "response": {"error": None}})
         node = self.pages.pop(0)
         return _Response(
@@ -92,6 +101,49 @@ class FunPaySendTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(MessageNotDeliveredError):
             await RawChats(transport).send(3, "new", None, False)
         self.assertEqual(transport.gets, 0)
+
+
+class BotMarkTests(unittest.IsolatedAsyncioTestCase):
+    async def test_message_mark_is_on_by_default(self):
+        transport = _Transport([11, 12])
+        await RawChats(transport).send(3, "new", None, False)
+        self.assertEqual(transport.contents, [f"{BOT_MARK}new"])
+
+    async def test_message_mark_can_be_disabled(self):
+        transport = _Transport([11, 12], bot_mark=False)
+        await RawChats(transport).send(3, "new", None, False)
+        self.assertEqual(transport.contents, ["new"])
+
+    async def test_review_mark_can_be_disabled(self):
+        transport = _ReviewTransport(bot_mark=False)
+        await RawOrders(transport).review("ORDER1234", "thanks", 5)
+        self.assertEqual(transport.text, "thanks")
+
+        transport = _ReviewTransport()
+        await RawOrders(transport).review("ORDER1234", "thanks", 5)
+        self.assertEqual(transport.text, f"thanks{BOT_MARK}")
+
+    def test_client_config_is_copied(self):
+        config = FunPayConfig.from_client(
+            FunPayClientConfig(golden_key="key", bot_mark=False)
+        )
+        self.assertFalse(config.bot_mark)
+
+
+class _ReviewTransport:
+    account_id = 5
+
+    def __init__(self, *, bot_mark: bool = True) -> None:
+        self.text: str | None = None
+        self._config = SimpleNamespace(bot_mark=bot_mark)
+
+    async def refresh_profile(self) -> None:
+        return None
+
+    async def request(self, method, url, **kwargs):
+        del method, url
+        self.text = kwargs["data"]["text"]
+        return _Response({"error": None})
 
 
 if __name__ == "__main__":

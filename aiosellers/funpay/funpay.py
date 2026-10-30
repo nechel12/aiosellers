@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 from collections.abc import Awaitable, Callable
@@ -65,6 +66,7 @@ class FunPay:
         self._listener: EventListener | None = None
         self._use_identity_map = config.use_identity_map
         self._account_id: int | None = None
+        self._polling_task: asyncio.Task | None = None
         if self._use_identity_map:
             self._identity_maps = _IdentityMaps(
                 users=IdentityMap(),
@@ -119,7 +121,7 @@ class FunPay:
         self._raw = RawAPI(self._transport)
         try:
             await self._transport.refresh_profile()
-        except Exception:
+        except BaseException:
             await self.close()
             raise
         self._account_id = self._transport.account_id
@@ -150,7 +152,7 @@ class FunPay:
     ):
         if self._transport is None:
             raise RuntimeError("Client is not started. Call start() or start_polling() first.")
-        return EventListener(self).listen(
+        return EventListener(self, state=self._config.state).listen(
             messages=messages,
             orders=orders,
             purchases=purchases,
@@ -166,14 +168,23 @@ class FunPay:
         purchases: bool = True,
         reviews: bool = True,
     ) -> None:
+        """Start the session and dispatch decorator handlers until :meth:`stop`."""
         await self.start()
+        self._polling_task = asyncio.current_task()
         try:
             async for event in self.listen(
                 messages=messages, orders=orders, purchases=purchases, reviews=reviews
             ):
                 await self._dispatch(event)
         finally:
+            self._polling_task = None
             await self.close()
+
+    def stop(self) -> None:
+        """Stop the loop started by :meth:`start_polling` from another task."""
+        task = self._polling_task
+        if task is not None and task is not asyncio.current_task() and not task.done():
+            task.cancel()
 
     async def replay_messages(
         self,
@@ -365,6 +376,7 @@ class FunPay:
             except Exception:
                 logger.exception("Review star lookup failed")
                 star_failed = True
+        handlers: list[_Handler] = []
         for handler in list(self._handlers):
             if handler.event_type != event.type:
                 continue
@@ -386,10 +398,27 @@ class FunPay:
                 except Exception:
                     logger.exception("Event filter failed")
                     continue
-            try:
-                await handler.fn(event)
-            except Exception:
-                logger.exception("Event handler failed")
+            handlers.append(handler)
+        if not handlers:
+            return
+
+        timeout = self._config.handler_timeout
+        limit = asyncio.Semaphore(max(1, self._config.max_concurrent_handlers))
+
+        async def run(handler: _Handler) -> None:
+            async with limit:
+                try:
+                    coro = handler.fn(event)
+                    if timeout is not None and timeout > 0:
+                        await asyncio.wait_for(coro, timeout)
+                    else:
+                        await coro
+                except TimeoutError:
+                    logger.warning("Event handler timed out after %s seconds", timeout)
+                except Exception:
+                    logger.exception("Event handler failed")
+
+        await asyncio.gather(*(run(handler) for handler in handlers))
 
 
 def _event_text(event: Any) -> str | None:
