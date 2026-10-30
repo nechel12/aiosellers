@@ -1,6 +1,6 @@
 [project]
-name = "aiosellers"
-version = "0.2.0"
+name = "aiosellers-nechel12"
+version = "0.3.0"
 description = "All In One Sellers API - Universal async API for digital trading platforms (FunPay, PlayerOK, GGsel). Fork of Zewsic/aiosellers with a shared hub and a GGsel adapter."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -11,18 +11,35 @@ authors = [
 maintainers = [
     { name = "nechel12", url = "https://github.com/nechel12" },
 ]
-keywords = ["funpay", "playerok", "ggsel", "marketplace", "asyncio", "api-wrapper", "bots"]
+keywords = [
+    "funpay",
+    "playerok",
+    "ggsel",
+    "marketplace",
+    "asyncio",
+    "api-wrapper",
+    "bots",
+    "digital-goods",
+    "seller-api",
+    "pydantic",
+    "sqlite",
+    "websockets",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Framework :: AsyncIO",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Typing :: Typed",
 ]
 dependencies = [
     "beautifulsoup4>=4.12",
-    "idna>=3.11",
+    # Not imported directly; kept as a dependency floor for the TLS stack.
+    # 3.15 fixes PYSEC-2026-215.
+    "idna>=3.15",
     "lxml>=5",
     "pydantic>=2.12.5",
     "websockets>=14",
@@ -35,10 +52,13 @@ Repository = "https://github.com/nechel12/aiosellers"
 Issues = "https://github.com/nechel12/aiosellers/issues"
 Changelog = "https://github.com/nechel12/aiosellers/blob/main/CHANGELOG.md"
 Upstream = "https://github.com/Zewsic/aiosellers"
+PyPI = "https://pypi.org/project/aiosellers-nechel12/"
 
 [dependency-groups]
 dev = [
+    "mypy>=1.14",
     "pytest>=8",
+    "pytest-cov>=6",
     "ruff>=0.14.10",
 ]
 
@@ -48,6 +68,12 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["aiosellers"]
+
+[tool.mypy]
+python_version = "3.12"
+check_untyped_defs = true
+ignore_missing_imports = true
+warn_unused_configs = true
 
 [tool.ruff]
 line-length = 100

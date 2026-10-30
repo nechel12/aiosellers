@@ -2,7 +2,32 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [0.3.0] - 2026-10-30
+
+### Fixed
+
+- `SellerHub.stream()` no longer deadlocks when a consumer leaves the stream
+  while the bounded queue is full.
+- `Chat.iter_messages()` now returns a working async iterator instead of
+  raising `TypeError`.
+- `Account` accepts `lastItemCreatedAt: null`, so new sellers can start the
+  Playerok client.
+- Custom `base_url` values without a trailing slash are normalized for Playerok
+  and GGsel transports.
+- `SQLiteStateStore` expands `~` in the database path.
+- `.gitignore` now covers SQLite state files, including WAL/SHM companions.
+
+### Changed
+
+- The distribution is now named `aiosellers-nechel12`; the import package remains
+  `aiosellers` and GitHub installs keep working.
+- CI runs on Python 3.12, 3.13 and 3.14 with locked dependencies, a coverage
+  floor, mypy, formatting checks and a wheel import smoke test.
+- CodeQL scans Python and GitHub Actions on push, pull request and weekly schedule.
+- PyPI publishing is available through the tag workflow when the `PYPI_PUBLISH`
+  repository variable and Trusted Publishing are configured.
+- `SECURITY.md` points at the Playerok download allowlist.
+- Bot examples only start polling when executed as scripts.
 
 ## [0.2.0] - 2026-10-30
 
@@ -16,7 +41,7 @@ All notable changes to this project are documented in this file.
   so `SellerHub` can merge GGsel sessions with FunPay and Playerok.
 - `aiosellers.core`: `Platform`, capability matrix, `EventKind`/`HubEvent` and `SellerHub`
   for running several sessions with one merged event stream.
-- `stop()` on both clients to end `start_polling()` from another task.
+- `stop()` on every client to end `start_polling()` from another task.
 - `max_concurrent_requests` for FunPay instead of one global request lock.
 - `py.typed` marker, package metadata and a dev dependency group.
 - CI workflow running lint and tests.
@@ -24,7 +49,7 @@ All notable changes to this project are documented in this file.
   badges and installation from GitHub, plus `SECURITY.md`, `CONTRIBUTING.md`,
   `CODE_OF_CONDUCT.md` and `RELEASING.md`.
 - GitHub issue and pull request templates and Dependabot for uv and Actions.
-- `StateStore` protocol with `MemoryStateStore` and `SQLiteStateStore`; both listeners
+- `StateStore` protocol with `MemoryStateStore` and `SQLiteStateStore`; all listeners
   persist cursors and dedup windows and recover them after a restart.
 - Bounded `sent_history_limit` (FunPay) and `processed_history_limit` (Playerok) windows.
 - `bot_mark` option to disable the invisible FunPay marker on outgoing messages and reviews.
@@ -50,6 +75,6 @@ All notable changes to this project are documented in this file.
 - `FunPay.chats.list()` no longer clears the identity map and breaks existing references.
 - FunPay rate limits honour `Retry-After` and retry up to three times.
 - FunPay GET requests retry 5xx and network errors with exponential backoff; POST stays single-shot.
-- Event handlers run with a per-handler timeout and limited concurrency on both platforms.
+- Event handlers run with a per-handler timeout and limited concurrency on every adapter.
 - With a configured state store, listeners no longer replay initial snapshots or duplicate
   messages and deals after a restart.
