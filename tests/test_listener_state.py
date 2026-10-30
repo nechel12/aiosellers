@@ -133,9 +133,7 @@ class FunPayStateTests(unittest.IsolatedAsyncioTestCase):
 
         restarted_raw = _FunPayRaw()
         restarted_raw.history_result = [_funpay_snapshot(12, "missed")]
-        restarted_raw.payloads.append(
-            _funpay_runner(BOOKMARK.format(node=12, text="missed"))
-        )
+        restarted_raw.payloads.append(_funpay_runner(BOOKMARK.format(node=12, text="missed")))
         restarted = _funpay_listener(restarted_raw, store)
         events = await restarted.tick(orders=False, purchases=False)
 
@@ -157,9 +155,7 @@ class FunPayStateTests(unittest.IsolatedAsyncioTestCase):
 
         restarted_raw = _FunPayRaw()
         restarted_raw.payloads.append(_funpay_runner(BOOKMARK.format(node=10, text="hi")))
-        events = await _funpay_listener(restarted_raw, store).tick(
-            orders=False, purchases=False
-        )
+        events = await _funpay_listener(restarted_raw, store).tick(orders=False, purchases=False)
         self.assertEqual(events, [])
 
     async def test_restart_keeps_the_order_snapshot(self):
@@ -169,9 +165,7 @@ class FunPayStateTests(unittest.IsolatedAsyncioTestCase):
         raw.sales_page = parse_order_list(
             ORDER_ROW.format(order_id="ABCD1234"), side=OrderSide.SALE
         )
-        first = await _funpay_listener(raw, store).tick(
-            messages=False, purchases=False
-        )
+        first = await _funpay_listener(raw, store).tick(messages=False, purchases=False)
         self.assertEqual([event.type for event in first], [FunPayEventTypes.INITIAL_ORDER])
 
         restarted_raw = _FunPayRaw()
@@ -179,12 +173,8 @@ class FunPayStateTests(unittest.IsolatedAsyncioTestCase):
         restarted_raw.sales_page = parse_order_list(
             ORDER_ROW.format(order_id="ABCD1234"), side=OrderSide.SALE
         )
-        events = await _funpay_listener(restarted_raw, store).tick(
-            messages=False, purchases=False
-        )
-        self.assertEqual(
-            [event.type for event in events], [FunPayEventTypes.ORDERS_LIST_CHANGED]
-        )
+        events = await _funpay_listener(restarted_raw, store).tick(messages=False, purchases=False)
+        self.assertEqual([event.type for event in events], [FunPayEventTypes.ORDERS_LIST_CHANGED])
 
     async def test_sent_message_ids_survive_restart(self):
         store = MemoryStateStore()
@@ -221,9 +211,7 @@ class FunPayStateTests(unittest.IsolatedAsyncioTestCase):
         raw = _FunPayRaw()
         raw.payloads.append(_funpay_runner(BOOKMARK.format(node=10, text="hi")))
 
-        events = await _funpay_listener(raw, store).tick(
-            orders=False, purchases=False
-        )
+        events = await _funpay_listener(raw, store).tick(orders=False, purchases=False)
         self.assertEqual([event.type for event in events], [FunPayEventTypes.INITIAL_CHAT])
 
 
@@ -321,12 +309,8 @@ class PlayerokStateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([event.type for event in first], [PlayerokEventTypes.NEW_MESSAGE])
 
         restarted = _playerok_listener(_playerok_client(_PlayerokRaw()), store)
-        restarted_chat = restarted.client.chats._create_chat(
-            ChatSchema(id="c1", type=ChatTypes.PM)
-        )
-        self.assertEqual(
-            await restarted.events_for_message(restarted_chat, message), []
-        )
+        restarted_chat = restarted.client.chats._create_chat(ChatSchema(id="c1", type=ChatTypes.PM))
+        self.assertEqual(await restarted.events_for_message(restarted_chat, message), [])
 
     async def test_deal_events_are_not_repeated_after_restart(self):
         store = MemoryStateStore()
@@ -334,16 +318,10 @@ class PlayerokStateTests(unittest.IsolatedAsyncioTestCase):
         client = _playerok_client(raw)
         listener = _playerok_listener(client, store)
         chat = client.chats._create_chat(ChatSchema(id="c1", type=ChatTypes.PM))
-        await listener.events_for_message(
-            chat, _playerok_message("m1", "{{ITEM_PAID}}", "deal-1")
-        )
+        await listener.events_for_message(chat, _playerok_message("m1", "{{ITEM_PAID}}", "deal-1"))
 
-        restarted = _playerok_listener(
-            _playerok_client(_PlayerokRaw(deal=_playerok_deal())), store
-        )
-        restarted_chat = restarted.client.chats._create_chat(
-            ChatSchema(id="c1", type=ChatTypes.PM)
-        )
+        restarted = _playerok_listener(_playerok_client(_PlayerokRaw(deal=_playerok_deal())), store)
+        restarted_chat = restarted.client.chats._create_chat(ChatSchema(id="c1", type=ChatTypes.PM))
         repeated = await restarted.events_for_message(
             restarted_chat, _playerok_message("m2", "{{ITEM_PAID}}", "deal-1")
         )
@@ -355,9 +333,7 @@ class PlayerokStateTests(unittest.IsolatedAsyncioTestCase):
         client = _playerok_client(raw)
         listener = _playerok_listener(client, store)
         chat = client.chats._create_chat(ChatSchema(id="c1", type=ChatTypes.PM))
-        await listener.events_for_message(
-            chat, _playerok_message("m1", "{{ITEM_PAID}}", "deal-1")
-        )
+        await listener.events_for_message(chat, _playerok_message("m1", "{{ITEM_PAID}}", "deal-1"))
 
         restarted = _playerok_listener(
             _playerok_client(_PlayerokRaw(deal=_playerok_deal(reviewed=True))), store
@@ -374,9 +350,7 @@ class PlayerokStateTests(unittest.IsolatedAsyncioTestCase):
         listener = _playerok_listener(client, store, processed_history_limit=2)
         chat = client.chats._create_chat(ChatSchema(id="c1", type=ChatTypes.PM))
         for message_id in ("m1", "m2", "m3"):
-            await listener.events_for_message(
-                chat, _playerok_message(message_id, "hello")
-            )
+            await listener.events_for_message(chat, _playerok_message(message_id, "hello"))
 
         snapshot = await store.get("playerok:me:listener")
         self.assertEqual(snapshot["messages"], ["m2", "m3"])
@@ -384,17 +358,13 @@ class PlayerokStateTests(unittest.IsolatedAsyncioTestCase):
         restarted = _playerok_listener(
             _playerok_client(_PlayerokRaw()), store, processed_history_limit=2
         )
-        restarted_chat = restarted.client.chats._create_chat(
-            ChatSchema(id="c1", type=ChatTypes.PM)
-        )
+        restarted_chat = restarted.client.chats._create_chat(ChatSchema(id="c1", type=ChatTypes.PM))
         replay = await restarted.events_for_message(
             restarted_chat, _playerok_message("m1", "hello")
         )
         self.assertEqual([event.type for event in replay], [PlayerokEventTypes.NEW_MESSAGE])
         self.assertEqual(
-            await restarted.events_for_message(
-                restarted_chat, _playerok_message("m3", "hello")
-            ),
+            await restarted.events_for_message(restarted_chat, _playerok_message("m3", "hello")),
             [],
         )
 
@@ -405,9 +375,7 @@ class PlayerokStateTests(unittest.IsolatedAsyncioTestCase):
         listener = _playerok_listener(client, store)
         chat = client.chats._create_chat(ChatSchema(id="c1", type=ChatTypes.PM))
 
-        events = await listener.events_for_message(
-            chat, _playerok_message("m1", "hello")
-        )
+        events = await listener.events_for_message(chat, _playerok_message("m1", "hello"))
         self.assertEqual([event.type for event in events], [PlayerokEventTypes.NEW_MESSAGE])
 
 

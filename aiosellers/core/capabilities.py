@@ -43,10 +43,7 @@ CAPABILITIES: dict[Platform, Capability] = {
         | Capability.WEBSOCKET
     ),
     Platform.GGSEL: (
-        Capability.MESSAGES
-        | Capability.ORDERS
-        | Capability.REVIEWS
-        | Capability.LIST_MANAGEMENT
+        Capability.MESSAGES | Capability.ORDERS | Capability.REVIEWS | Capability.LIST_MANAGEMENT
     ),
 }
 
