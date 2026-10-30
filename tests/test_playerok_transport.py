@@ -6,16 +6,21 @@ from aiosellers.playerok.core.exceptions import (
     RateLimitedError,
     RequestFailedError,
 )
+from aiosellers.playerok.raw.items import RawItemsService
 from aiosellers.playerok.transport import tls
 from aiosellers.playerok.transport.tls import PlayerokTransport
 
 
 class _Response:
-    def __init__(self, status_code=200, text="", content=b"payload", headers=None):
+    def __init__(self, status_code=200, text="", content=b"payload", headers=None, payload=None):
         self.status_code = status_code
         self.text = text
         self.content = content
         self.headers = headers or {}
+        self.payload = payload
+
+    def json(self):
+        return self.payload
 
 
 class _FakeClient:
@@ -134,6 +139,32 @@ class RequestTests(TransportTestBase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(self.session.calls), 2)
 
+    async def test_post_with_explicit_retry_retries_server_errors(self):
+        transport = self.make_transport([_Response(503), _Response(200)])
+        with mock.patch.object(tls.asyncio, "sleep", _no_sleep):
+            response = await transport.request("post", "/graphql", {"query": "x"}, retry=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(self.session.calls), 2)
+
+
+class RawRequestRetryTests(TransportTestBase):
+    async def test_read_post_retries_and_mutation_post_does_not(self):
+        read_transport = self.make_transport(
+            [
+                _Response(503),
+                _Response(payload={"data": {"item": {"id": "i1", "name": "x", "price": 1}}}),
+            ]
+        )
+        with mock.patch.object(tls.asyncio, "sleep", _no_sleep):
+            item = await RawItemsService(read_transport).get_item(id="i1")
+        self.assertEqual(item.id, "i1")
+        self.assertEqual(len(self.session.calls), 2)
+
+        mutation_transport = self.make_transport([_Response(503)])
+        with self.assertRaises(RequestFailedError):
+            await RawItemsService(mutation_transport).remove_item("i1")
+        self.assertEqual(len(self.session.calls), 1)
+
 
 class DownloadTests(TransportTestBase):
     async def test_download_uses_unauthenticated_client(self):
@@ -167,6 +198,55 @@ class DownloadTests(TransportTestBase):
         transport = self.make_transport(download_responses=[_Response(200, content=b"x")])
         await transport.download("https://cdn.playerok.com/pic.png")
         self.assertEqual(self.download.calls[0][1], "https://cdn.playerok.com/pic.png")
+
+    async def test_download_does_not_allow_registrable_parent_of_base_host(self):
+        transport = self.make_transport(base_url="https://api.example.co.uk/")
+        self.assertEqual(transport._download_hosts, {"playerok.com", "api.example.co.uk"})
+        with self.assertRaises(PermissionError):
+            await transport.download("https://co.uk/pic.png")
+
+    async def test_download_allows_explicit_environment_host(self):
+        with mock.patch.dict("os.environ", {tls.DOWNLOAD_HOSTS_ENV: "cdn.example.org"}):
+            transport = self.make_transport(download_responses=[_Response(200, content=b"x")])
+        await transport.download("https://cdn.example.org/pic.png")
+        self.assertEqual(self.download.calls[0][1], "https://cdn.example.org/pic.png")
+
+    async def test_download_validates_and_follows_redirects_manually(self):
+        transport = self.make_transport(
+            download_responses=[
+                _Response(302, headers={"Location": "/next.png"}),
+                _Response(200, content=b"ok"),
+            ]
+        )
+        data = await transport.download("https://playerok.com/pic.png")
+        self.assertEqual(data, b"ok")
+        self.assertEqual(
+            [call[1] for call in self.download.calls],
+            ["https://playerok.com/pic.png", "https://playerok.com/next.png"],
+        )
+        for call in self.download.calls:
+            self.assertFalse(call[2]["follow_redirects"])
+
+    async def test_download_rejects_untrusted_redirect_target(self):
+        transport = self.make_transport(
+            download_responses=[
+                _Response(302, headers={"Location": "https://evil.example.com/pic.png"})
+            ]
+        )
+        with self.assertRaises(PermissionError):
+            await transport.download("https://playerok.com/pic.png")
+        self.assertEqual(len(self.download.calls), 1)
+
+    async def test_download_limits_redirects(self):
+        transport = self.make_transport(
+            download_responses=[
+                _Response(302, headers={"Location": f"/{index}.png"})
+                for index in range(tls.DOWNLOAD_REDIRECT_LIMIT + 1)
+            ]
+        )
+        with self.assertRaisesRegex(RequestFailedError, "redirects"):
+            await transport.download("https://playerok.com/pic.png")
+        self.assertEqual(len(self.download.calls), tls.DOWNLOAD_REDIRECT_LIMIT + 1)
 
     async def test_download_retries_server_errors(self):
         transport = self.make_transport(

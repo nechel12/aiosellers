@@ -25,8 +25,6 @@ Handler = Callable[[GGselEvent], Awaitable[None]]
 Predicate = Callable[[GGselEvent], bool]
 TextFilter = str | Callable[[str | None], bool]
 
-_SKIP = {EventTypes.INITIAL_CHAT}
-
 
 @dataclass(slots=True)
 class _Handler:
@@ -57,6 +55,7 @@ class GGsel:
         self._use_identity_map = config.use_identity_map
         self._seller_id: int | None = config.seller_id
         self._polling_task: asyncio.Task | None = None
+        self._lifecycle_lock = asyncio.Lock()
 
         if self._use_identity_map:
             self._identity_maps = _IdentityMaps(
@@ -108,38 +107,40 @@ class GGsel:
         await self.close()
 
     async def start(self) -> None:
-        if self._transport is not None:
-            return
+        async with self._lifecycle_lock:
+            if self._transport is not None:
+                return
 
-        transport = GGselTransport(
-            api_key=self._config.api_key,
-            seller_id=self._config.seller_id,
-            config=GGselConfig(
-                user_agent=self._config.user_agent,
-                request_timeout=self._config.request_timeout,
-                base_url=self._config.base_url,
-                locale=self._config.locale,
-            ),
-        )
-        try:
-            await transport.login()
-        except BaseException:
-            await transport.close()
-            raise
+            transport = GGselTransport(
+                api_key=self._config.api_key,
+                seller_id=self._config.seller_id,
+                config=GGselConfig(
+                    user_agent=self._config.user_agent,
+                    request_timeout=self._config.request_timeout,
+                    base_url=self._config.base_url,
+                    locale=self._config.locale,
+                ),
+            )
+            try:
+                await transport.login()
+            except BaseException:
+                await transport.close()
+                raise
 
-        self._transport = transport
-        self._raw = RawAPI(transport)
-        self._seller_id = transport.seller_id
+            self._transport = transport
+            self._raw = RawAPI(transport)
+            self._seller_id = transport.seller_id
 
     async def close(self) -> None:
-        transport = self._transport
-        self._transport = None
-        self._raw = None
-        if self._use_identity_map:
-            self._identity_maps.chats.clear()
-            self._identity_maps.products.clear()
-        if transport is not None:
-            await transport.close()
+        async with self._lifecycle_lock:
+            transport = self._transport
+            self._transport = None
+            self._raw = None
+            if self._use_identity_map:
+                self._identity_maps.chats.clear()
+                self._identity_maps.products.clear()
+            if transport is not None:
+                await transport.close()
 
     def listen(
         self,
@@ -221,8 +222,6 @@ class GGsel:
         return lambda func: register(func, predicate=cast(Predicate, fn))
 
     async def _dispatch(self, event: GGselEvent) -> None:
-        if event.type in _SKIP:
-            return
         handlers: list[_Handler] = []
         for handler in list(self._handlers):
             if handler.event_type != event.type:

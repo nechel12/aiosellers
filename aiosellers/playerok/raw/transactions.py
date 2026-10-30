@@ -29,7 +29,7 @@ class RawTransactionService:
         self, direction: TransactionProviderDirections = TransactionProviderDirections.IN
     ) -> list[TransactionProvider]:
         response = await self._transport.request(
-            "post", "graphql", GQL.get_transaction_providers(direction)
+            "post", "graphql", GQL.get_transaction_providers(direction), retry=True
         )
         raw = response.json()
         _raise_on_gql_errors(raw)
@@ -65,6 +65,7 @@ class RawTransactionService:
                 from_date=from_date,
                 to_date=to_date,
             ),
+            retry=True,
         )
         raw = response.json()
         _raise_on_gql_errors(raw)
@@ -73,7 +74,9 @@ class RawTransactionService:
         return TransactionList(**data)
 
     async def get_sbp_bank_members(self) -> list[SBPBankMember]:
-        response = await self._transport.request("post", "graphql", GQL.get_sbp_bank_members())
+        response = await self._transport.request(
+            "post", "graphql", GQL.get_sbp_bank_members(), retry=True
+        )
         raw = response.json()
         _raise_on_gql_errors(raw)
 
@@ -87,7 +90,7 @@ class RawTransactionService:
         direction: SortDirections = SortDirections.ASC,
     ) -> UserBankCardList:
         response = await self._transport.request(
-            "post", "graphql", GQL.get_verified_cards(count, after_cursor, direction)
+            "post", "graphql", GQL.get_verified_cards(count, after_cursor, direction), retry=True
         )
         raw = response.json()
         _raise_on_gql_errors(raw)

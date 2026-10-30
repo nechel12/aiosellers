@@ -1,3 +1,4 @@
+import asyncio
 import json
 import unittest
 from types import SimpleNamespace
@@ -86,6 +87,61 @@ class FunPaySendTests(unittest.IsolatedAsyncioTestCase):
         sent = await RawChats(transport).send(3, "new", None, False)
         self.assertEqual(sent.id, 12)
         self.assertEqual(transport.gets, 1)
+
+    async def test_send_fallback_is_serialized_per_chat_only(self) -> None:
+        class _ConcurrentTransport:
+            account_id = 5
+            username = "me"
+            _config = SimpleNamespace(bot_mark=False)
+
+            def __init__(self) -> None:
+                self.latest: dict[str, int] = {}
+                self.active = 0
+                self.max_active = 0
+
+            async def refresh_profile(self) -> None:
+                return None
+
+            async def request(self, method, url, **kwargs):
+                del method, url
+                payload = json.loads(kwargs["data"]["request"])
+                chat_id = str(payload["data"]["node"])
+                self.active += 1
+                self.max_active = max(self.max_active, self.active)
+                try:
+                    await asyncio.sleep(0.01)
+                    self.latest[chat_id] = self.latest.get(chat_id, 0) + 1
+                    return _Response({"objects": [], "response": {"error": None}})
+                finally:
+                    self.active -= 1
+
+        class _FallbackChats(RawChats):
+            def __init__(self, transport) -> None:
+                super().__init__(transport)
+                self.before: list[int] = []
+
+            async def _node_message_id(self, chat_id):
+                before = self.transport.latest.get(str(chat_id), 0)
+                self.before.append(before)
+                return before
+
+            async def _message_after(self, chat_id, before):
+                del chat_id
+                return SimpleNamespace(id=before + 1)
+
+        transport = _ConcurrentTransport()
+        raw = _FallbackChats(transport)
+        sent = await asyncio.gather(
+            raw.send(3, "one", None, False), raw.send(3, "two", None, False)
+        )
+
+        self.assertEqual(sorted(message.id for message in sent), [1, 2])
+        self.assertEqual(raw.before, [0, 1])
+        self.assertEqual(transport.max_active, 1)
+
+        transport.max_active = 0
+        await asyncio.gather(raw.send(3, "three", None, False), raw.send(4, "four", None, False))
+        self.assertEqual(transport.max_active, 2)
 
     async def test_runner_error_is_not_treated_as_sent(self) -> None:
         transport = _Transport([11, 12])

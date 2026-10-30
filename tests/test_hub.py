@@ -71,6 +71,7 @@ class CapabilityTests(unittest.TestCase):
         self.assertIn(Capability.WEBSOCKET, playerok)
         self.assertNotIn(Capability.ORDERS, playerok)
         self.assertIn(Capability.ORDERS, ggsel)
+        self.assertIn(Capability.PURCHASES, ggsel)
         self.assertIn(Capability.MESSAGES, ggsel)
         self.assertIn(Capability.REVIEWS, ggsel)
         self.assertNotIn(Capability.WEBSOCKET, ggsel)
@@ -135,6 +136,7 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(good.started)
         self.assertTrue(good.closed)
         self.assertFalse(bad.started)
+        self.assertTrue(bad.closed)
 
     async def test_stream_tags_events_and_honours_listen_options(self):
         funpay = _FakeClient([_event(FunPayEvents.NEW_MESSAGE), _event(FunPayEvents.NEW_ORDER)])

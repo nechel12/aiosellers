@@ -56,6 +56,67 @@ class PlayerokLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.assertIs(client._transport, transport)
             self.assertEqual(client.me_id, "me-1")
 
+    async def test_concurrent_starts_create_one_transport(self):
+        with (
+            mock.patch("aiosellers.playerok.playerok.PlayerokTransport") as transport_cls,
+            mock.patch("aiosellers.playerok.playerok.RawAPI") as raw_cls,
+        ):
+            transport = transport_cls.return_value
+            transport.close = mock.AsyncMock()
+            get_me_started = asyncio.Event()
+            finish_get_me = asyncio.Event()
+
+            async def get_me():
+                get_me_started.set()
+                await finish_get_me.wait()
+                return SimpleNamespace(id="me-1")
+
+            raw_cls.return_value.account.get_me = get_me
+            client = Playerok(PlayerokClientConfig(access_token="token"))
+            first = asyncio.create_task(client.start())
+            await asyncio.wait_for(get_me_started.wait(), 1)
+            second = asyncio.create_task(client.start())
+            finish_get_me.set()
+            await asyncio.gather(first, second)
+
+            transport_cls.assert_called_once()
+            transport.close.assert_not_awaited()
+            self.assertIs(client._transport, transport)
+            self.assertEqual(client.me_id, "me-1")
+
+    async def test_close_waits_for_inflight_start(self):
+        with (
+            mock.patch("aiosellers.playerok.playerok.PlayerokTransport") as transport_cls,
+            mock.patch("aiosellers.playerok.playerok.RawAPI") as raw_cls,
+        ):
+            transport = transport_cls.return_value
+            transport.close = mock.AsyncMock()
+            get_me_started = asyncio.Event()
+            finish_get_me = asyncio.Event()
+
+            async def get_me():
+                get_me_started.set()
+                await finish_get_me.wait()
+                return SimpleNamespace(id="me-1")
+
+            raw_cls.return_value.account.get_me = get_me
+            client = Playerok(PlayerokClientConfig(access_token="token"))
+            starting = asyncio.create_task(client.start())
+            await asyncio.wait_for(get_me_started.wait(), 1)
+            closing = asyncio.create_task(client.close())
+            finish_get_me.set()
+            await asyncio.gather(starting, closing)
+
+            transport.close.assert_awaited_once()
+            self.assertIsNone(client._transport)
+            self.assertIsNone(client._raw)
+            self.assertIsNone(client.me_id)
+
+    def test_access_token_is_hidden_from_config_repr(self):
+        config = PlayerokClientConfig(access_token="secret-token")
+
+        self.assertNotIn("secret-token", repr(config))
+
     async def test_stop_cancels_polling_and_closes(self):
         client = _PollingClient().install(Playerok(PlayerokClientConfig(access_token="token")))
         task = asyncio.create_task(client.start_polling())

@@ -4,11 +4,12 @@ from bs4 import BeautifulSoup
 
 from ..core.constants import BOT_MARK, OLD_BOT_MARK
 from ..core.utils import parse_currency, parse_price
-from ..exceptions import UnauthorizedError
+from ..exceptions import RequestFailedError, UnauthorizedError
 from ..schemas import OrderShortcut, OrderSide, OrderSnapshot, OrderStatuses, ReviewSnapshot
 from ._bs4 import attr, attr_list
 
 _SALES_HEADERS = frozenset({"мои продажи", "my sales", "мої продажі"})
+_PURCHASE_HEADERS = frozenset({"мои покупки", "my purchases", "мої покупки"})
 
 
 def _user_id(href: str | None) -> int:
@@ -29,16 +30,21 @@ def _status(classes: list[str]) -> OrderStatuses:
 
 def parse_order_list(html: str, *, side: OrderSide) -> tuple[str | None, list[OrderShortcut]]:
     soup = BeautifulSoup(html, "lxml")
-    if side is OrderSide.SALE:
-        header = soup.select_one("h1.page-header")
-        if header is not None:
-            first = next(header.stripped_strings, "")
-            if first.lower() not in _SALES_HEADERS:
-                raise UnauthorizedError("sales page unauthorized", body=html)
+    header = soup.select_one("h1.page-header")
+    rows = soup.select("a.tc-item")
+    if header is None and not rows:
+        raise RequestFailedError("unexpected orders page structure", body=html)
+    if header is not None:
+        is_sale = side is OrderSide.SALE
+        expected = _SALES_HEADERS if is_sale else _PURCHASE_HEADERS
+        first = next(header.stripped_strings, "")
+        if first.lower() not in expected:
+            label = "sales" if is_sale else "purchases"
+            raise UnauthorizedError(f"{label} page unauthorized", body=html)
     cursor_node = soup.select_one("input[name=continue]")
     cursor = attr(cursor_node, "value") or None
     orders: list[OrderShortcut] = []
-    for row in soup.select("a.tc-item"):
+    for row in rows:
         order_node = row.select_one("div.tc-order")
         order_id = (order_node.get_text(strip=True) if order_node is not None else "").lstrip("#")
         desc_node = row.select_one("div.order-desc div")

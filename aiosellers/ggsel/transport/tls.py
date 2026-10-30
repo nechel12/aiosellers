@@ -124,12 +124,16 @@ class GGselTransport:
         if payload.valid_thru is None:
             return time.monotonic() + 3600
         remaining = payload.valid_thru.timestamp() - now
-        return time.monotonic() + max(TOKEN_REFRESH_MARGIN, remaining - TOKEN_REFRESH_MARGIN)
+        return time.monotonic() + max(0.0, remaining - TOKEN_REFRESH_MARGIN)
 
-    async def _invalidate_token(self) -> None:
+    async def _token_after_unauthorized(self, expected: str) -> str:
         async with self._token_lock:
-            self._token = None
-            self._token_valid_until = 0.0
+            if self._token == expected:
+                self._token = None
+                self._token_valid_until = 0.0
+            elif self._token and time.monotonic() < self._token_valid_until:
+                return self._token
+        return await self.login()
 
     async def request(
         self,
@@ -145,16 +149,29 @@ class GGselTransport:
         if method not in ("get", "post"):
             raise RuntimeError(f"Unsupported HTTP method: {method}")
 
-        await self.login()
+        token = await self.login()
         try:
             return await self._request_with_retries(
-                method, path, params=params, json_body=json_body, auth=True, retry=retry
+                method,
+                path,
+                params=params,
+                json_body=json_body,
+                auth=True,
+                retry=retry,
+                token=token,
             )
         except UnauthorizedError:
-            await self._invalidate_token()
-            await self.login()
+            if method == "post" and retry is not True:
+                raise
+            token = await self._token_after_unauthorized(token)
             return await self._request_with_retries(
-                method, path, params=params, json_body=json_body, auth=True, retry=retry
+                method,
+                path,
+                params=params,
+                json_body=json_body,
+                auth=True,
+                retry=retry,
+                token=token,
             )
 
     async def _request_with_retries(
@@ -166,6 +183,7 @@ class GGselTransport:
         json_body: Any | None,
         auth: bool,
         retry: bool | None,
+        token: str | None = None,
     ) -> Any:
         attempts = REQUEST_ATTEMPTS if (retry if retry is not None else method == "get") else 1
         url = (
@@ -178,10 +196,10 @@ class GGselTransport:
         for attempt in range(attempts):
             query = dict(params or {})
             if auth:
-                token = self._token
-                if not token:
+                request_token = token or self._token
+                if not request_token:
                     raise UnauthorizedError("GGsel access token is not available")
-                query["token"] = token
+                query["token"] = request_token
 
             try:
                 response = await self._exchange(method, url, query, json_body)

@@ -11,6 +11,7 @@ from ..core.exceptions import CloudflareDetected, RateLimitedError, RequestFaile
 DOWNLOAD_HOSTS_ENV = "PLAYEROK_DOWNLOAD_HOSTS"
 REQUEST_ATTEMPTS = 3
 DOWNLOAD_ATTEMPTS = 3
+DOWNLOAD_REDIRECT_LIMIT = 3
 
 
 def _retry_after(headers: Any) -> float | None:
@@ -69,9 +70,6 @@ class PlayerokTransport:
         host = (urlparse(base_url).hostname or "").lower()
         if host:
             hosts.add(host)
-            parts = host.split(".")
-            if len(parts) >= 2:
-                hosts.add(".".join(parts[-2:]))
         extra = os.getenv(DOWNLOAD_HOSTS_ENV, "")
         hosts.update(part.strip().lower() for part in extra.split(",") if part.strip())
         return hosts
@@ -138,6 +136,7 @@ class PlayerokTransport:
         *,
         headers: dict[str, str] | None = None,
         files: dict[str, Any] | None = None,
+        retry: bool | None = None,
     ) -> Any:
         if method not in ("get", "post"):
             raise RuntimeError(f"Unsupported HTTP method: {method}")
@@ -150,8 +149,9 @@ class PlayerokTransport:
             url = self._config.base_url.rstrip("/") + "/" + url.lstrip("/")
 
         payload = payload or {}
-        # POST is not idempotent, so only GET is retried automatically.
-        attempts = REQUEST_ATTEMPTS if method == "get" else 1
+        # POST remains single-shot unless a read-only operation explicitly opts in.
+        should_retry = method == "get" if retry is None else retry
+        attempts = REQUEST_ATTEMPTS if should_retry else 1
         last_error: Exception | None = None
 
         for attempt in range(attempts):
@@ -189,6 +189,28 @@ class PlayerokTransport:
 
         raise RequestFailedError(f"Playerok request failed: {url}: {last_error}") from last_error
 
+    async def _get_download_response(self, client: Any, url: str) -> tuple[Any, str]:
+        current_url = url
+        for redirect_count in range(DOWNLOAD_REDIRECT_LIMIT + 1):
+            response = await client.get(current_url, follow_redirects=False)
+            status = getattr(response, "status_code", 200)
+            if status not in (301, 302, 303, 307, 308):
+                return response, current_url
+
+            headers = getattr(response, "headers", None)
+            location = headers.get("location") or headers.get("Location") if headers else None
+            if not location:
+                raise RequestFailedError(
+                    f"Playerok download redirect has no Location header ({current_url})"
+                )
+            if redirect_count >= DOWNLOAD_REDIRECT_LIMIT:
+                raise RequestFailedError(
+                    f"Playerok download exceeded {DOWNLOAD_REDIRECT_LIMIT} redirects ({url})"
+                )
+            current_url = self._check_download_url(urljoin(current_url, location))
+
+        raise AssertionError("unreachable")
+
     async def download(self, url: str) -> bytes:
         """Download a file by URL from an allowlisted host without the session cookie."""
         url = self._check_download_url(url)
@@ -198,7 +220,9 @@ class PlayerokTransport:
         for attempt in range(DOWNLOAD_ATTEMPTS):
             retry_after = None
             try:
-                response = await client.get(url)
+                response, response_url = await self._get_download_response(client, url)
+            except (PermissionError, ValueError, RequestFailedError):
+                raise
             except Exception as exc:
                 last_error = exc
             else:
@@ -212,14 +236,16 @@ class PlayerokTransport:
                 retry_after = _retry_after(getattr(response, "headers", None))
                 if status == 429:
                     last_error = RateLimitedError(
-                        f"Playerok rate limited the download: HTTP 429 ({url})"
+                        f"Playerok rate limited the download: HTTP 429 ({response_url})"
                     )
                 elif status >= 500:
                     last_error = RequestFailedError(
-                        f"Playerok download failed: HTTP {status} ({url})"
+                        f"Playerok download failed: HTTP {status} ({response_url})"
                     )
                 else:
-                    raise RequestFailedError(f"Playerok download failed: HTTP {status} ({url})")
+                    raise RequestFailedError(
+                        f"Playerok download failed: HTTP {status} ({response_url})"
+                    )
 
             if attempt + 1 < DOWNLOAD_ATTEMPTS:
                 await asyncio.sleep(_backoff(attempt, retry_after))

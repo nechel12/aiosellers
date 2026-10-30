@@ -69,6 +69,7 @@ class Playerok:
         self._use_identity_map = config.use_identity_map
         self._me_id: str | None = None
         self._polling_task: asyncio.Task | None = None
+        self._lifecycle_lock = asyncio.Lock()
 
         if self._use_identity_map:
             self._identity_maps = _IdentityMaps(
@@ -112,43 +113,46 @@ class Playerok:
 
     async def start(self) -> None:
         """Start the client."""
-        if self._transport is not None:
-            return
+        async with self._lifecycle_lock:
+            if self._transport is not None:
+                return
 
-        transport = PlayerokTransport(
-            access_token=self._config.access_token,
-            config=PlayerokConfig(
-                user_agent=self._config.user_agent,
-                request_timeout=self._config.request_timeout,
-                base_url=self._config.base_url,
-            ),
-        )
-        raw = RawAPI(transport)
-        try:
-            me = await raw.account.get_me()
-        except BaseException:
-            await transport.close()
-            raise
+            transport = PlayerokTransport(
+                access_token=self._config.access_token,
+                config=PlayerokConfig(
+                    user_agent=self._config.user_agent,
+                    request_timeout=self._config.request_timeout,
+                    base_url=self._config.base_url,
+                ),
+            )
+            raw = RawAPI(transport)
+            try:
+                me = await raw.account.get_me()
+            except BaseException:
+                await transport.close()
+                raise
 
-        self._transport = transport
-        self._raw = raw
-        self._me_id = me.id
+            self._transport = transport
+            self._raw = raw
+            self._me_id = me.id
 
     async def close(self) -> None:
         """Close the client."""
-        if self._transport is None:
-            return
+        async with self._lifecycle_lock:
+            if self._transport is None:
+                return
 
-        await self._transport.close()
-        self._transport = None
-        self._raw = None
+            await self._transport.close()
+            self._transport = None
+            self._raw = None
+            self._me_id = None
 
-        if self._use_identity_map:
-            self._identity_maps.users.clear()
-            self._identity_maps.chats.clear()
-            self._identity_maps.deals.clear()
-            self._identity_maps.games.clear()
-            self._identity_maps.items.clear()
+            if self._use_identity_map:
+                self._identity_maps.users.clear()
+                self._identity_maps.chats.clear()
+                self._identity_maps.deals.clear()
+                self._identity_maps.games.clear()
+                self._identity_maps.items.clear()
 
     async def download(self, url: str) -> bytes:
         if self._transport is None:

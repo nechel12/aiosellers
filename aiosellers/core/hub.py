@@ -88,12 +88,12 @@ class SellerHub:
             raise KeyError(f"Unknown session {session_id!r}") from None
 
     async def start(self) -> None:
-        """Start every session; if one fails, close the ones already started."""
+        """Start every session; if one fails, close it and the ones already started."""
         started: list[Session] = []
         try:
             for session in self._sessions.values():
-                await session.client.start()
                 started.append(session)
+                await session.client.start()
         except BaseException:
             await asyncio.gather(
                 *(session.client.close() for session in started), return_exceptions=True

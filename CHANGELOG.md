@@ -2,6 +2,27 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.3.1] - 2026-10-30
+
+### Fixed
+
+- Listeners no longer process events or overwrite durable cursors when the state store
+  cannot be read; loading is retried before polling resumes.
+- FunPay fetches complete chat/order gaps, rejects unexpected order-page HTML and
+  serializes message sends per chat to avoid misattributed delivery confirmations.
+- Playerok marks messages, deals and reviews as processed only after event construction,
+  reconnects when WebSocket acknowledgement or subscriptions fail, and makes client
+  startup single-flight.
+- Playerok image downloads reject credentials and non-public addresses, validate every
+  redirect and enforce a 10 MiB limit. Download redirects use the host allowlist, and
+  read-only GraphQL POST requests retry transient failures while mutations stay single-shot.
+- GGsel refreshes expiring tokens correctly, handles concurrent 401 responses without
+  discarding newer tokens, avoids repeating non-idempotent POST requests, and reads
+  review bursts across pages.
+- GGsel startup is single-flight, `SellerHub.start()` also closes the client whose start
+  failed, and explicit GGsel initial-chat handlers are dispatched.
+- API keys, access tokens, golden keys and proxy credentials are hidden from config `repr`.
+
 ## [0.3.0] - 2026-10-30
 
 ### Fixed

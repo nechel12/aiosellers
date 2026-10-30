@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from ..core.state import StateStore
@@ -29,12 +29,12 @@ class FunPayClientConfig:
         bot_mark: Add the invisible BOT_MARK to outgoing messages and reviews.
     """
 
-    golden_key: str | None = None
+    golden_key: str | None = field(default=None, repr=False)
     user_agent: str | None = None
     request_timeout: float = 10.0
     base_url: str = "https://funpay.com/"
     locale: Literal["ru", "en", "uk"] | None = None
-    proxy: str | None = None
+    proxy: str | None = field(default=None, repr=False)
     use_identity_map: bool = True
     poll_interval: float = 6.0
     session_refresh_seconds: float = 2400.0

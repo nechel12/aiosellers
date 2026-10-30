@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("aiosellers.playerok.listener")
 
 _WS_URL = "wss://ws.playerok.com/graphql"
+_WS_ACK_TIMEOUT = 15.0
 _WS_RECONNECT_INITIAL = 1.0
 _WS_RECONNECT_MAX = 30.0
 _STOP = object()
@@ -377,8 +378,6 @@ class EventListener:
             schema = await self._raw().deals.get_deal(deal_id)
             if schema is None or schema.review is None:
                 continue
-            self.review_deal_ids.remove(deal_id)
-            self._mark_state_dirty()
             deal = self.client.deals._create_deal(schema)
             chat = None
             if deal.chat_id:
@@ -388,6 +387,8 @@ class EventListener:
             if chat is None:
                 continue
             events.append(NewReviewEvent(client=self.client, chat=chat, deal=deal))
+            self.review_deal_ids.remove(deal_id)
+            self._mark_state_dirty()
         await self._save_state()
         return events
 
@@ -403,30 +404,24 @@ class EventListener:
             return []
         if message.id in self.processed_message_ids:
             return []
-        self._mark_message(message.id)
 
         kinds = classify_message(message.text)
         if kinds == [EventTypes.NEW_MESSAGE]:
-            return [
-                NewMessageEvent(
-                    client=self.client,
-                    chat=chat,
-                    message=self.client.chats.messages._create_message(message, chat.id),
-                )
-            ]
+            event = NewMessageEvent(
+                client=self.client,
+                chat=chat,
+                message=self.client.chats.messages._create_message(message, chat.id),
+            )
+            self._mark_message(message.id)
+            return [event]
 
         actual = await self._refetch_message(chat.id, message.id) or message
         deal_schema = actual.deal
         if deal_schema is None or not deal_schema.id:
             return []
-        if EventTypes.NEW_DEAL in kinds:
-            if deal_schema.id in self.processed_deal_ids:
-                return []
-            self.processed_deal_ids.add(deal_schema.id)
-            self.known_deal_ids.add(deal_schema.id)
-            if deal_schema.id not in self.review_deal_ids:
-                self.review_deal_ids.append(deal_schema.id)
-            self._mark_state_dirty()
+        if EventTypes.NEW_DEAL in kinds and deal_schema.id in self.processed_deal_ids:
+            self._mark_message(message.id)
+            return []
 
         fetched = await self._refetch_deal(deal_schema.id)
         if fetched is not None:
@@ -447,6 +442,13 @@ class EventListener:
                     ),
                 )
             )
+
+        if EventTypes.NEW_DEAL in kinds:
+            self.processed_deal_ids.add(deal_schema.id)
+            self.known_deal_ids.add(deal_schema.id)
+            if deal_schema.id not in self.review_deal_ids:
+                self.review_deal_ids.append(deal_schema.id)
+        self._mark_message(message.id)
         return events
 
     async def listen(
@@ -533,15 +535,24 @@ class EventListener:
                             },
                         }
                     )
-                    async for raw in ws:
-                        if self._stop.is_set():
-                            break
+                    ack_deadline = asyncio.get_running_loop().time() + _WS_ACK_TIMEOUT
+                    while not self._stop.is_set():
+                        if connected:
+                            raw = await ws.recv()
+                        else:
+                            remaining = ack_deadline - asyncio.get_running_loop().time()
+                            if remaining <= 0:
+                                raise TimeoutError("Timed out waiting for WebSocket connection_ack")
+                            raw = await asyncio.wait_for(ws.recv(), timeout=remaining)
                         try:
                             data = json.loads(raw)
                         except json.JSONDecodeError:
                             continue
                         events = await self.handle_frame(data)
-                        if data.get("type") == "connection_ack":
+                        frame_type = data.get("type")
+                        if frame_type in {"connection_error", "error"}:
+                            raise ConnectionError(f"WebSocket {frame_type}")
+                        if frame_type == "connection_ack":
                             connected = True
                             if self._needs_resync:
                                 self._needs_resync = False
@@ -759,22 +770,25 @@ class EventListener:
         user_id = self.client.me_id
         if user_id is None:
             return
-        self._state_loaded = True
         self._state_key = f"playerok:{user_id}:listener"
-        try:
-            data = await self.state.get(self._state_key)
-        except Exception as exc:
-            logger.warning("Playerok state load failed: %s", exc)
-            return
-        if not isinstance(data, dict) or data.get("version") != 1:
-            return
-        try:
-            self._restore_state(data)
-        except (TypeError, ValueError) as exc:
-            logger.warning("Playerok state is malformed, starting fresh: %s", exc)
-            self._reset_state()
-        else:
-            self._state_dirty = False
+        async with self._state_lock:
+            if self._state_loaded:
+                return
+            try:
+                data = await self.state.get(self._state_key)
+            except Exception as exc:
+                logger.warning("Playerok state load failed: %s", exc)
+                raise
+            self._state_loaded = True
+            if not isinstance(data, dict) or data.get("version") != 1:
+                return
+            try:
+                self._restore_state(data)
+            except (TypeError, ValueError) as exc:
+                logger.warning("Playerok state is malformed, starting fresh: %s", exc)
+                self._reset_state()
+            else:
+                self._state_dirty = False
 
     def _restore_state(self, data: dict[str, Any]) -> None:
         messages = self._string_list(data.get("messages"), "messages")
@@ -823,10 +837,15 @@ class EventListener:
         }
 
     async def _save_state(self) -> None:
-        if self.state is None or not self._state_dirty or self._state_key is None:
+        if (
+            self.state is None
+            or not self._state_loaded
+            or not self._state_dirty
+            or self._state_key is None
+        ):
             return
         async with self._state_lock:
-            if not self._state_dirty:
+            if not self._state_loaded or not self._state_dirty:
                 return
             version = self._state_version
             snapshot = self._snapshot()

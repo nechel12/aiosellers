@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ..core.state import StateStore
 
@@ -25,7 +25,7 @@ class GGselClientConfig:
         state: Optional store for chat cursors and dedup windows across restarts
     """
 
-    api_key: str | None = None
+    api_key: str | None = field(default=None, repr=False)
     seller_id: int | None = None
     user_agent: str | None = None
     request_timeout: float = 10.0

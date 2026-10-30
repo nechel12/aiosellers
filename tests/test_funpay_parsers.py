@@ -1,6 +1,7 @@
 import unittest
 
 from aiosellers.funpay.core.utils import classify_message
+from aiosellers.funpay.exceptions import RequestFailedError
 from aiosellers.funpay.parsers.home import parse_home
 from aiosellers.funpay.parsers.lots import parse_my_lots
 from aiosellers.funpay.parsers.orders import parse_order_list
@@ -80,6 +81,23 @@ class FunPayParserTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(orders[0].buyer_username, "Bob")
         self.assertEqual(orders[0].buyer_id, 9)
         self.assertEqual(orders[0].price, 100)
+
+    def test_order_list_validates_empty_page_structure_for_both_sides(self) -> None:
+        pages = (
+            (OrderSide.SALE, "Мои продажи"),
+            (OrderSide.PURCHASE, "My purchases"),
+        )
+        for side, title in pages:
+            with self.subTest(side=side, page="empty"):
+                cursor, orders = parse_order_list(
+                    f'<h1 class="page-header">{title}</h1>', side=side
+                )
+                self.assertIsNone(cursor)
+                self.assertEqual(orders, [])
+            for html in ("<div>captcha</div>", '<h1 class="page-header">Wrong page</h1>'):
+                with self.subTest(side=side, page=html):
+                    with self.assertRaises(RequestFailedError):
+                        parse_order_list(html, side=side)
 
     def test_my_lot_id_comes_from_data_offer(self) -> None:
         html = """

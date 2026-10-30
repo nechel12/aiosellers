@@ -37,6 +37,7 @@ class RawDealsService:
                 direction=direction,
                 after_cursor=after_cursor,
             ),
+            retry=True,
         )
         raw = response.json()
         _raise_on_gql_errors(raw)
@@ -47,7 +48,9 @@ class RawDealsService:
         return ItemDealList(**data)
 
     async def get_deal(self, deal_id: str) -> ItemDeal | None:
-        response = await self._transport.request("post", "graphql", GQL.get_deal(deal_id=deal_id))
+        response = await self._transport.request(
+            "post", "graphql", GQL.get_deal(deal_id=deal_id), retry=True
+        )
         raw = response.json()
         _raise_on_gql_errors(raw)
 

@@ -54,8 +54,9 @@ class EventListener:
         history_limit: int = 100,
         history_batches: int = 10,
         history_grace_seconds: float = 300.0,
-        sales_top: int = 50,
+        sales_top: int = 100,
         reviews_page_size: int = 50,
+        review_page_limit: int = 10,
         state_limit: int = 1000,
         include_own: bool = False,
     ) -> None:
@@ -68,6 +69,7 @@ class EventListener:
         self.history_grace_seconds = history_grace_seconds
         self.sales_top = max(1, min(100, sales_top))
         self.reviews_page_size = max(1, min(100, reviews_page_size))
+        self.review_page_limit = max(1, review_page_limit)
         self.state_limit = max(1, state_limit)
         self.include_own = include_own
 
@@ -111,7 +113,8 @@ class EventListener:
     ) -> list[Any]:
         if self.client._transport is None:
             raise RuntimeError("Client is not started. Call start() or start_polling() first.")
-        await self._ensure_state_loaded()
+        if not await self._ensure_state_loaded():
+            return []
 
         events: list[Any] = []
         try:
@@ -314,10 +317,9 @@ class EventListener:
         ]
 
     async def _review_events(self) -> list[Any]:
-        response = await self.client._require_raw().reviews.reviews(
-            page=1, count=self.reviews_page_size
-        )
-        rows = response.reviews
+        service = self.client._require_raw().reviews
+        response = await service.reviews(page=1, count=self.reviews_page_size)
+        rows = list(response.reviews)
         ids = [row.id for row in rows]
         if not self._reviews_ready:
             self._reviews = ids[: self.state_limit]
@@ -326,6 +328,18 @@ class EventListener:
             return []
 
         known = set(self._reviews)
+        page = 1
+        while (
+            len(response.reviews) >= self.reviews_page_size
+            and page < self.review_page_limit
+            and (response.total_pages is None or page < response.total_pages)
+            and not any(row.id in known for row in response.reviews)
+        ):
+            page += 1
+            response = await service.reviews(page=page, count=self.reviews_page_size)
+            rows.extend(row for row in response.reviews if row.id not in ids)
+            ids = [row.id for row in rows]
+
         fresh = [row for row in rows if row.id not in known]
         if not fresh:
             return []
@@ -350,21 +364,21 @@ class EventListener:
         self._state_dirty = True
         self._state_version += 1
 
-    async def _ensure_state_loaded(self) -> None:
+    async def _ensure_state_loaded(self) -> bool:
         if self.state is None or self._state_loaded:
-            return
+            return True
         seller_id = self.client.seller_id
         if seller_id is None:
-            return
-        self._state_loaded = True
+            return True
         self._state_key = f"ggsel:{seller_id}:listener"
         try:
             data = await self.state.get(self._state_key)
         except Exception as exc:
             logger.warning("GGsel state load failed: %s", exc)
-            return
+            return False
+        self._state_loaded = True
         if not isinstance(data, dict) or data.get("version") != 1:
-            return
+            return True
         try:
             self._restore_state(data)
         except (TypeError, ValueError) as exc:
@@ -372,6 +386,7 @@ class EventListener:
             self._reset_state()
         else:
             self._state_dirty = False
+        return True
 
     def _restore_state(self, data: dict[str, Any]) -> None:
         raw_chats = data.get("chats") or {}
@@ -429,7 +444,12 @@ class EventListener:
         }
 
     async def _save_state(self) -> None:
-        if self.state is None or not self._state_dirty or self._state_key is None:
+        if (
+            self.state is None
+            or not self._state_loaded
+            or not self._state_dirty
+            or self._state_key is None
+        ):
             return
         async with self._state_lock:
             if not self._state_dirty:

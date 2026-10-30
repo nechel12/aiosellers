@@ -19,7 +19,7 @@ class RawAccountService:
         self._transport = transport
 
     async def get_me(self) -> Account:
-        response = await self._transport.request("post", "graphql", GQL.get_me())
+        response = await self._transport.request("post", "graphql", GQL.get_me(), retry=True)
         raw = response.json()
         _raise_on_gql_errors(raw)
 
@@ -31,7 +31,9 @@ class RawAccountService:
     async def get_account(self, username: str | None = None) -> AccountProfile | None:
         if username is None:
             raise ValueError("Can't get account with no username")
-        response = await self._transport.request("post", "graphql", GQL.get_user(username=username))
+        response = await self._transport.request(
+            "post", "graphql", GQL.get_user(username=username), retry=True
+        )
         raw = response.json()
         _raise_on_gql_errors(raw)
 
@@ -48,7 +50,7 @@ class RawAccountService:
         if username is None and id is None:
             raise ValueError("Can't get user with no username or id")
         response = await self._transport.request(
-            "post", "graphql", GQL.get_user(username=username, id=id)
+            "post", "graphql", GQL.get_user(username=username, id=id), retry=True
         )
         raw = response.json()
         _raise_on_gql_errors(raw)
@@ -95,6 +97,7 @@ class RawAccountService:
                 sort_direction=sort_direction,
                 sort_field=sort_field,
             ),
+            retry=True,
         )
         raw = response.json()
         _raise_on_gql_errors(raw)

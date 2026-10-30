@@ -49,6 +49,7 @@ _REVIEW_EVENTS = {
     MessageTypes.FEEDBACK_CHANGED: ReviewChangedEvent,
     MessageTypes.FEEDBACK_DELETED: ReviewDeletedEvent,
 }
+_POLL_ERRORS = (RequestFailedError, TimeoutError, OSError)
 
 
 def message_events(client: FunPay, chat, message, *, reviews: bool) -> list[FunPayEvent]:
@@ -170,7 +171,7 @@ class EventListener:
             await transport.refresh_profile()
         except UnauthorizedError:
             raise
-        except RequestFailedError as exc:
+        except _POLL_ERRORS as exc:
             logger.warning("FunPay session refresh failed: %s", exc)
             return []
         try:
@@ -182,7 +183,7 @@ class EventListener:
             return []
         except UnauthorizedError:
             raise
-        except RequestFailedError as exc:
+        except _POLL_ERRORS as exc:
             logger.warning("FunPay poll failed: %s", exc)
             return []
         finally:
@@ -192,7 +193,8 @@ class EventListener:
         account_id = self.client.account_id
         if account_id is None:
             raise AccountNotInitiatedError("account is not initiated")
-        await self._ensure_state_loaded(account_id)
+        if not await self._ensure_state_loaded(account_id):
+            return []
         raw = self.client._raw
         assert raw is not None
         payload = await raw.account.runner_poll(
@@ -226,7 +228,12 @@ class EventListener:
                 counters = obj
         events = []
         if messages and bookmarks is not None:
-            events.extend(await self._chat_events(bookmarks, reviews=reviews))
+            try:
+                events.extend(await self._chat_events(bookmarks, reviews=reviews))
+            except UnauthorizedError:
+                raise
+            except _POLL_ERRORS as exc:
+                logger.warning("FunPay chat poll failed: %s", exc)
         buyer, seller = _counts(counters)
         previous = self._last_counts
         counters_known = counters is not None
@@ -241,18 +248,40 @@ class EventListener:
         # The runner counters change only when orders are added or removed; status-only
         # transitions are caught by the periodic full resync.
         fetch_sales = orders and (
-            not counters_known or previous is None or resync_due or seller != previous[1]
+            not self._orders_ready
+            or not counters_known
+            or previous is None
+            or resync_due
+            or seller != previous[1]
         )
         fetch_purchases = purchases and (
-            not counters_known or previous is None or resync_due or buyer != previous[0]
+            not self._purchases_ready
+            or not counters_known
+            or previous is None
+            or resync_due
+            or buyer != previous[0]
         )
 
         if fetch_sales:
-            rows, complete = await self._sales_rows(raw)
-            events.extend(self._order_diff(rows, buyer, seller, complete=complete))
+            try:
+                rows, complete = await self._sales_rows(raw)
+            except UnauthorizedError:
+                raise
+            except _POLL_ERRORS as exc:
+                logger.warning("FunPay sales poll failed: %s", exc)
+                self._next_order_resync = 0
+            else:
+                events.extend(self._order_diff(rows, buyer, seller, complete=complete))
         if fetch_purchases:
-            rows, complete = await self._purchase_rows(raw)
-            events.extend(self._purchase_diff(rows, buyer, seller, complete=complete))
+            try:
+                rows, complete = await self._purchase_rows(raw)
+            except UnauthorizedError:
+                raise
+            except _POLL_ERRORS as exc:
+                logger.warning("FunPay purchases poll failed: %s", exc)
+                self._next_order_resync = 0
+            else:
+                events.extend(self._purchase_diff(rows, buyer, seller, complete=complete))
         return events
 
     async def _sales_rows(self, raw):
@@ -328,12 +357,23 @@ class EventListener:
             chat = self.client.chats._from_shortcut(shortcut)
             events.append(LastChatMessageChangedEvent(client=self.client, chat=chat))
             try:
-                history = await self._history_since(
+                history, complete = await self._history_since(
                     raw, shortcut.id, shortcut.node_message_id, stored
                 )
+            except UnauthorizedError:
+                raise
             except Exception:
                 logger.exception("FunPay history failed for chat %s", shortcut.id)
                 # Keep the old cursor so the next tick retries the same gap.
+                self._chats[shortcut.id] = (
+                    stored,
+                    shortcut.user_message_id,
+                    shortcut.last_message_text,
+                )
+                self._mark_state_dirty()
+                continue
+            if not complete:
+                # Do not emit a partial gap or advance past messages still to be fetched.
                 self._chats[shortcut.id] = (
                     stored,
                     shortcut.user_message_id,
@@ -356,18 +396,21 @@ class EventListener:
         """Read history pages until the stored cursor is reached; one page may not cover the gap."""
         collected: dict[int, object] = {}
         last = newest_id + 1
+        complete = False
         for _ in range(self.chat_history_batches):
             batch = await raw.chats.history(chat_id, last, retry=False)
             if not batch:
+                complete = True
                 break
             for snap in batch:
                 if stored < snap.id < last:
                     collected[snap.id] = snap
             oldest = min((snap.id for snap in batch), default=None)
             if oldest is None or oldest <= stored + 1 or oldest >= last:
+                complete = True
                 break
             last = oldest
-        return [collected[key] for key in sorted(collected)]
+        return [collected[key] for key in sorted(collected)], complete
 
     def _order_diff(self, rows, buyer: int, seller: int, *, complete: bool = True):
         return self._diff(
@@ -421,6 +464,8 @@ class EventListener:
         complete: bool = True,
     ):
         if not getattr(self, ready_name):
+            if not complete:
+                return []
             events = []
             for row in rows:
                 saved[row.id] = row.status
@@ -466,18 +511,18 @@ class EventListener:
         self._state_dirty = True
         self._state_version += 1
 
-    async def _ensure_state_loaded(self, account_id: int) -> None:
+    async def _ensure_state_loaded(self, account_id: int) -> bool:
         if self.state is None or self._state_loaded:
-            return
-        self._state_loaded = True
+            return True
         self._state_key = f"funpay:{account_id}:listener"
         try:
             data = await self.state.get(self._state_key)
         except Exception as exc:
             logger.warning("FunPay state load failed: %s", exc)
-            return
+            return False
+        self._state_loaded = True
         if not isinstance(data, dict) or data.get("version") != 1:
-            return
+            return True
         try:
             self._restore_state(data)
         except (KeyError, TypeError, ValueError) as exc:
@@ -485,6 +530,7 @@ class EventListener:
             self._reset_state()
         else:
             self._state_dirty = False
+        return True
 
     def _reset_state(self) -> None:
         self.sent_ids.clear()
@@ -561,7 +607,12 @@ class EventListener:
         }
 
     async def _save_state(self) -> None:
-        if self.state is None or not self._state_dirty or self._state_key is None:
+        if (
+            self.state is None
+            or not self._state_loaded
+            or not self._state_dirty
+            or self._state_key is None
+        ):
             return
         async with self._state_lock:
             if not self._state_dirty:

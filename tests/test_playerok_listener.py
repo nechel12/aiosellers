@@ -1,7 +1,9 @@
+import asyncio
 import json
 import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest import mock
 
 from aiosellers.playerok.api.chats import ChatAPI
 from aiosellers.playerok.api.deals import DealAPI
@@ -62,6 +64,34 @@ class _WS:
 
     async def send(self, raw):
         self.frames.append(json.loads(raw))
+
+
+class _Socket:
+    def __init__(self, listener, frames=(), *, stop_on_enter=False, stop_after_frames=False):
+        self.listener = listener
+        self.frames = list(frames)
+        self.stop_on_enter = stop_on_enter
+        self.stop_after_frames = stop_after_frames
+        self.sent = []
+
+    async def __aenter__(self):
+        if self.stop_on_enter:
+            self.listener._stop.set()
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
+
+    async def send(self, raw):
+        self.sent.append(json.loads(raw))
+
+    async def recv(self):
+        if not self.frames:
+            await asyncio.Future()
+        frame = self.frames.pop(0)
+        if not self.frames and self.stop_after_frames:
+            self.listener._stop.set()
+        return json.dumps(frame)
 
 
 def _recent_message(message_id="m1", text="hello"):
@@ -142,6 +172,67 @@ class FrameLifecycleTests(unittest.IsolatedAsyncioTestCase):
         )
 
 
+class SocketLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def _drain(self, listener):
+        async for _ in listener._socket_events():
+            pass
+
+    async def test_ack_timeout_reconnects(self):
+        listener = EventListener(_Client())
+        first = _Socket(listener)
+        second = _Socket(listener, stop_on_enter=True)
+        with (
+            mock.patch("aiosellers.playerok.listener._WS_ACK_TIMEOUT", 0.01),
+            mock.patch("websockets.connect", side_effect=[first, second]) as connect,
+            mock.patch(
+                "aiosellers.playerok.listener.asyncio.sleep", new_callable=mock.AsyncMock
+            ) as sleep,
+        ):
+            await asyncio.wait_for(self._drain(listener), 1)
+
+        self.assertEqual(connect.call_count, 2)
+        sleep.assert_awaited_once()
+
+    async def test_connection_error_reconnects(self):
+        listener = EventListener(_Client())
+        first = _Socket(listener, [{"type": "connection_error", "payload": {}}])
+        second = _Socket(listener, stop_on_enter=True)
+        with (
+            mock.patch("websockets.connect", side_effect=[first, second]) as connect,
+            mock.patch(
+                "aiosellers.playerok.listener.asyncio.sleep", new_callable=mock.AsyncMock
+            ) as sleep,
+        ):
+            await asyncio.wait_for(self._drain(listener), 1)
+
+        self.assertEqual(connect.call_count, 2)
+        sleep.assert_awaited_once()
+
+    async def test_subscription_error_reconnects_and_resubscribes(self):
+        listener = EventListener(_Client())
+        first = _Socket(
+            listener,
+            [{"type": "connection_ack"}, {"type": "error", "payload": ["boom"]}],
+        )
+        second = _Socket(listener, [{"type": "connection_ack"}], stop_after_frames=True)
+        with (
+            mock.patch("websockets.connect", side_effect=[first, second]) as connect,
+            mock.patch(
+                "aiosellers.playerok.listener.asyncio.sleep", new_callable=mock.AsyncMock
+            ) as sleep,
+        ):
+            await asyncio.wait_for(self._drain(listener), 1)
+
+        self.assertEqual(connect.call_count, 2)
+        operations = [
+            frame["payload"]["operationName"]
+            for frame in second.sent
+            if frame["type"] == "subscribe"
+        ]
+        self.assertEqual(sorted(operations), ["chatUpdated", "userUpdated"])
+        sleep.assert_awaited_once()
+
+
 class ResyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_resync_emits_new_chat_and_unseen_message(self):
         chat = ChatSchema.model_validate(
@@ -210,3 +301,27 @@ class ReviewsOnlyModeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(events[0], NewReviewEvent)
         self.assertEqual(events[0].deal.id, "d2")
         self.assertEqual(events[0].chat.id, "c1")
+
+    async def test_review_stays_queued_until_chat_is_available(self):
+        payload = {
+            "id": "d1",
+            "status": "CONFIRMED",
+            "direction": "IN",
+            "testimonial": {"id": "r1", "status": "APPROVED", "rating": 5},
+        }
+        raw_deals = _RawDeals(deals={"d1": ItemDeal.model_validate(payload)})
+        listener = EventListener(_Client(deals=raw_deals), review_delay=0)
+        listener.review_deal_ids.append("d1")
+
+        self.assertEqual(await listener.poll_reviews_once(), [])
+        self.assertEqual(listener.review_deal_ids, ["d1"])
+
+        raw_deals.deals["d1"] = ItemDeal.model_validate(
+            payload | {"chat": {"id": "c1", "type": "PM"}}
+        )
+        listener.review_checks["d1"]["last"] = 0.0
+        events = await listener.poll_reviews_once()
+
+        self.assertEqual(len(events), 1)
+        self.assertIsInstance(events[0], NewReviewEvent)
+        self.assertEqual(listener.review_deal_ids, [])

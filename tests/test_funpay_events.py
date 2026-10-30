@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 
 from aiosellers.funpay import FunPay
@@ -268,6 +269,106 @@ class FunPayEventTests(unittest.IsolatedAsyncioTestCase):
         ids = [event.message.id for event in events if event.type is EventTypes.NEW_MESSAGE]
         self.assertEqual(ids, [11, 12, 13])
 
+    async def test_chat_history_page_limit_keeps_cursor_and_retries(self) -> None:
+        _client, listener, raw = _listener()
+        listener.chat_history_batches = 1
+        raw.payloads.append(_runner(BOOKMARK.format(node=10, text="hi")))
+        await listener.tick(orders=False, purchases=False)
+
+        raw.payloads.append(_runner(BOOKMARK.format(node=13, text="new")))
+        raw.history_pages = {14: [_snap(12), _snap(13)]}
+        incomplete = await listener.tick(orders=False, purchases=False)
+
+        self.assertNotIn(EventTypes.NEW_MESSAGE, [event.type for event in incomplete])
+        self.assertEqual(listener._chats[3][0], 10)
+
+        listener.chat_history_batches = 2
+        raw.payloads.append(_runner(BOOKMARK.format(node=13, text="new")))
+        raw.history_pages = {14: [_snap(12), _snap(13)], 12: [_snap(10), _snap(11)]}
+        retried = await listener.tick(orders=False, purchases=False)
+
+        ids = [event.message.id for event in retried if event.type is EventTypes.NEW_MESSAGE]
+        self.assertEqual(ids, [11, 12, 13])
+        self.assertEqual(listener._chats[3][0], 13)
+
+    async def test_sales_failure_does_not_discard_chat_events(self) -> None:
+        from aiosellers.funpay.exceptions import RequestFailedError
+
+        _client, listener, raw = _listener()
+        raw.payloads.append(_runner(BOOKMARK.format(node=10, text="hi")))
+        await listener.tick(orders=False, purchases=False)
+
+        raw.history_result = [_snap(11, "hey")]
+        raw.payloads.append(_runner(BOOKMARK.format(node=11, text="hey"), seller=3))
+
+        async def failed_sales(*args, **kwargs):
+            del args, kwargs
+            raise RequestFailedError("HTTP 0", status_code=0)
+
+        raw.sales = failed_sales  # type: ignore[method-assign]
+        events = await listener.tick(purchases=False)
+
+        self.assertIn(EventTypes.NEW_MESSAGE, [event.type for event in events])
+        self.assertEqual(listener._chats[3][0], 11)
+        self.assertFalse(listener._orders_ready)
+        self.assertEqual(listener._orders, {})
+
+    async def test_purchases_failure_does_not_discard_sales_events(self) -> None:
+        from aiosellers.funpay.exceptions import RequestFailedError
+
+        _client, listener, raw = _listener()
+        raw.payloads.append(_runner(""))
+        raw.sales_pages.append(
+            parse_order_list(_order_row("ABCD1234", "info"), side=OrderSide.SALE)
+        )
+        await listener.tick(messages=False, purchases=False)
+
+        raw.payloads.append(_runner("", buyer=2, seller=3))
+        raw.sales_pages.append(
+            parse_order_list(_order_row("ABCD1235", "info"), side=OrderSide.SALE)
+        )
+
+        async def failed_purchases(*args, **kwargs):
+            del args, kwargs
+            raise RequestFailedError("HTTP 0", status_code=0)
+
+        raw.purchases = failed_purchases  # type: ignore[method-assign]
+        events = await listener.tick(messages=False)
+
+        self.assertIn(EventTypes.NEW_ORDER, [event.type for event in events])
+        self.assertIn("ABCD1235", listener._orders)
+        self.assertFalse(listener._purchases_ready)
+
+    async def test_incomplete_order_baseline_is_retried(self) -> None:
+        _client, listener, raw = _listener()
+        listener.order_page_limit = 1
+        first_page = (
+            _order_row("ABCD1234", "info")
+            + '<input type="hidden" name="continue" value="next-page">'
+        )
+        raw.sales_pages.append(parse_order_list(first_page, side=OrderSide.SALE))
+        raw.payloads.append(_runner(""))
+
+        incomplete = await listener.tick(messages=False, purchases=False)
+
+        self.assertEqual(incomplete, [])
+        self.assertFalse(listener._orders_ready)
+        self.assertEqual(listener._orders, {})
+
+        listener.order_page_limit = 2
+        raw.sales_pages.append(parse_order_list(first_page, side=OrderSide.SALE))
+        raw.sales_pages.append(
+            parse_order_list(_order_row("ABCD1235", "info"), side=OrderSide.SALE)
+        )
+        raw.payloads.append(_runner(""))
+        retried = await listener.tick(messages=False, purchases=False)
+
+        self.assertEqual(
+            [event.type for event in retried],
+            [EventTypes.INITIAL_ORDER, EventTypes.INITIAL_ORDER],
+        )
+        self.assertTrue(listener._orders_ready)
+
     async def test_handlers_text_and_review_stars(self) -> None:
         client = FunPay(FunPayClientConfig(golden_key="key"))
         seen: list[str] = []
@@ -385,6 +486,15 @@ class FunPayEventTests(unittest.IsolatedAsyncioTestCase):
         await listener.tick(orders=False, purchases=False)
         raw.poll_error = RequestFailedError("HTTP 0", status_code=0)
         self.assertEqual(await listener.tick(orders=False, purchases=False), [])
+        for error in (TimeoutError("timed out"), OSError("connection lost")):
+            raw.poll_error = error
+            self.assertEqual(await listener.tick(orders=False, purchases=False), [])
+        raw.poll_error = UnauthorizedError("unauthorized")
+        with self.assertRaises(UnauthorizedError):
+            await listener.tick(orders=False, purchases=False)
+        raw.poll_error = asyncio.CancelledError()
+        with self.assertRaises(asyncio.CancelledError):
+            await listener.tick(orders=False, purchases=False)
         raw.history_result = [
             MessageSnapshot(
                 id=11,

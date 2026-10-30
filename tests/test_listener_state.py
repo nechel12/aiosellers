@@ -1,6 +1,7 @@
 import unittest
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from unittest import mock
 
 from aiosellers import MemoryStateStore
 from aiosellers.funpay import FunPay
@@ -114,6 +115,24 @@ class _FunPayTransport:
         del force
 
 
+class _FunPayFlakyStateStore(MemoryStateStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.fail_get = True
+        self.get_calls = 0
+        self.set_calls = 0
+
+    async def get(self, key: str):
+        self.get_calls += 1
+        if self.fail_get:
+            raise OSError("temporary state failure")
+        return await super().get(key)
+
+    async def set(self, key: str, value) -> None:
+        self.set_calls += 1
+        await super().set(key, value)
+
+
 def _funpay_listener(raw: _FunPayRaw, store, **options) -> EventListener:
     client = FunPay(FunPayClientConfig(golden_key="key"))
     client._account_id = 5
@@ -204,6 +223,43 @@ class FunPayStateTests(unittest.IsolatedAsyncioTestCase):
 
         snapshot = await store.get("funpay:5:listener")
         self.assertEqual(snapshot["sent"], [[3, 2], [3, 3]])
+
+    async def test_failed_state_load_is_retried_without_overwriting_state(self):
+        store = _FunPayFlakyStateStore()
+        key = "funpay:5:listener"
+        await store.set(
+            key,
+            {
+                "version": 1,
+                "chats": {"3": [10, 9, "hi"]},
+                "orders": {},
+                "purchases": {},
+                "ready": [True, False, False],
+                "last_counts": None,
+                "sent": [],
+            },
+        )
+        store.set_calls = 0
+        raw = _FunPayRaw()
+        raw.payloads.append(_funpay_runner(BOOKMARK.format(node=11, text="hey")))
+        listener = _funpay_listener(raw, store)
+
+        self.assertEqual(await listener.tick(orders=False, purchases=False), [])
+
+        self.assertFalse(listener._state_loaded)
+        self.assertEqual(store.set_calls, 0)
+        self.assertEqual(len(raw.payloads), 1)
+        saved = await MemoryStateStore.get(store, key)
+        self.assertEqual(saved["chats"]["3"][0], 10)
+
+        store.fail_get = False
+        raw.history_result = [_funpay_snapshot(11, "hey")]
+        events = await listener.tick(orders=False, purchases=False)
+
+        self.assertTrue(listener._state_loaded)
+        self.assertEqual(store.get_calls, 2)
+        self.assertIn(FunPayEventTypes.NEW_MESSAGE, [event.type for event in events])
+        self.assertEqual(store.set_calls, 1)
 
     async def test_malformed_state_falls_back_to_a_fresh_start(self):
         store = MemoryStateStore()
@@ -296,7 +352,128 @@ def _playerok_listener(client: Playerok, store, **options) -> PlayerokListener:
     )
 
 
+class _FlakyPlayerokStateStore:
+    def __init__(self, data):
+        self.data = data
+        self.get_calls = 0
+        self.set_calls = []
+
+    async def get(self, key):
+        del key
+        self.get_calls += 1
+        if self.get_calls == 1:
+            raise RuntimeError("temporarily unavailable")
+        return self.data
+
+    async def set(self, key, value):
+        self.set_calls.append((key, value))
+        self.data = value
+
+
 class PlayerokStateTests(unittest.IsolatedAsyncioTestCase):
+    async def test_new_message_is_marked_only_after_entity_construction(self):
+        client = _playerok_client(_PlayerokRaw())
+        listener = _playerok_listener(client, MemoryStateStore())
+        chat = client.chats._create_chat(ChatSchema(id="c1", type=ChatTypes.PM))
+        message = _playerok_message("m1", "hello")
+
+        with mock.patch.object(
+            client.chats.messages, "_create_message", side_effect=RuntimeError("invalid entity")
+        ):
+            with self.assertRaises(RuntimeError):
+                await listener.events_for_message(chat, message)
+        self.assertNotIn(message.id, listener.processed_message_ids)
+
+        first = await listener.events_for_message(chat, message)
+        self.assertEqual([event.type for event in first], [PlayerokEventTypes.NEW_MESSAGE])
+        self.assertEqual(await listener.events_for_message(chat, message), [])
+
+    async def test_refetch_failure_leaves_message_retryable(self):
+        raw = _PlayerokRaw(deal=_playerok_deal())
+        client = _playerok_client(raw)
+        listener = _playerok_listener(client, MemoryStateStore())
+        chat = client.chats._create_chat(ChatSchema(id="c1", type=ChatTypes.PM))
+        message = _playerok_message("m1", "{{ITEM_PAID}}", "deal-1")
+        raw.get_chat_messages = mock.AsyncMock(side_effect=RuntimeError("temporarily unavailable"))
+
+        with self.assertRaises(RuntimeError):
+            await listener.events_for_message(chat, message)
+        self.assertNotIn(message.id, listener.processed_message_ids)
+        self.assertNotIn("deal-1", listener.processed_deal_ids)
+
+        raw.get_chat_messages = mock.AsyncMock(return_value=SimpleNamespace(messages=[message]))
+        events = await listener.events_for_message(chat, message)
+        self.assertEqual(len(events), 2)
+        self.assertIn(message.id, listener.processed_message_ids)
+
+    async def test_missing_deal_leaves_message_retryable(self):
+        raw = _PlayerokRaw()
+        client = _playerok_client(raw)
+        listener = _playerok_listener(client, MemoryStateStore())
+        chat = client.chats._create_chat(ChatSchema(id="c1", type=ChatTypes.PM))
+        message = _playerok_message("m1", "{{ITEM_PAID}}")
+
+        self.assertEqual(await listener.events_for_message(chat, message), [])
+        self.assertNotIn(message.id, listener.processed_message_ids)
+
+        actual = _playerok_message("m1", "{{ITEM_PAID}}", "deal-1")
+        raw.deal = _playerok_deal()
+        raw.get_chat_messages = mock.AsyncMock(return_value=SimpleNamespace(messages=[actual]))
+        events = await listener.events_for_message(chat, message)
+        self.assertEqual(len(events), 2)
+        self.assertIn(message.id, listener.processed_message_ids)
+
+    async def test_entity_failure_does_not_mark_deal_processed(self):
+        raw = _PlayerokRaw(deal=_playerok_deal())
+        client = _playerok_client(raw)
+        listener = _playerok_listener(client, MemoryStateStore())
+        chat = client.chats._create_chat(ChatSchema(id="c1", type=ChatTypes.PM))
+        message = _playerok_message("m1", "{{ITEM_PAID}}", "deal-1")
+
+        with mock.patch.object(
+            client.deals, "_create_deal", side_effect=RuntimeError("invalid entity")
+        ):
+            with self.assertRaises(RuntimeError):
+                await listener.events_for_message(chat, message)
+        self.assertNotIn(message.id, listener.processed_message_ids)
+        self.assertNotIn("deal-1", listener.processed_deal_ids)
+        self.assertEqual(listener.review_deal_ids, [])
+
+        events = await listener.events_for_message(chat, message)
+        self.assertEqual(len(events), 2)
+        self.assertIn("deal-1", listener.processed_deal_ids)
+
+    async def test_state_load_failure_is_retried_without_saving(self):
+        store = _FlakyPlayerokStateStore({"version": 1, "messages": ["stored"]})
+        listener = _playerok_listener(_playerok_client(_PlayerokRaw()), store)
+
+        with self.assertRaisesRegex(RuntimeError, "temporarily unavailable"):
+            await listener._ensure_state_loaded()
+        self.assertFalse(listener._state_loaded)
+        listener._mark_message("unsaved")
+        await listener._save_state()
+        self.assertEqual(store.set_calls, [])
+
+        await listener._ensure_state_loaded()
+        self.assertTrue(listener._state_loaded)
+        self.assertEqual(store.get_calls, 2)
+        self.assertEqual(listener.processed_message_ids, {"stored"})
+        self.assertEqual(store.set_calls, [])
+
+    async def test_message_waits_for_state_restore_instead_of_using_empty_state(self):
+        store = _FlakyPlayerokStateStore({"version": 1, "messages": ["m1"]})
+        listener = _playerok_listener(_playerok_client(_PlayerokRaw()), store)
+        chat = listener.client.chats._create_chat(ChatSchema(id="c1", type=ChatTypes.PM))
+        message = _playerok_message("m1", "hello")
+
+        with self.assertRaisesRegex(RuntimeError, "temporarily unavailable"):
+            await listener.events_for_message(chat, message)
+        self.assertNotIn("m1", listener.processed_message_ids)
+        self.assertEqual(store.set_calls, [])
+
+        self.assertEqual(await listener.events_for_message(chat, message), [])
+        self.assertEqual(listener.processed_message_ids, {"m1"})
+
     async def test_processed_messages_survive_restart(self):
         store = MemoryStateStore()
         raw = _PlayerokRaw()

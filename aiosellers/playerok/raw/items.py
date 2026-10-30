@@ -55,6 +55,7 @@ class RawItemsService:
                 search=search,
                 sort=sort,
             ),
+            retry=True,
         )
         raw = response.json()
         _raise_on_gql_errors(raw)
@@ -68,7 +69,9 @@ class RawItemsService:
         if id is None and slug is None:
             raise ValueError("Can't get item without id or slug")
 
-        response = await self._transport.request("post", "graphql", GQL.get_item(id=id, slug=slug))
+        response = await self._transport.request(
+            "post", "graphql", GQL.get_item(id=id, slug=slug), retry=True
+        )
         raw = response.json()
         _raise_on_gql_errors(raw)
 
@@ -217,7 +220,10 @@ class RawItemsService:
         self, item_id: str, price: int
     ) -> list[ItemPriorityStatus]:
         response = await self._transport.request(
-            "post", "graphql", GQL.get_item_priority_statuses(item_id=item_id, price=price)
+            "post",
+            "graphql",
+            GQL.get_item_priority_statuses(item_id=item_id, price=price),
+            retry=True,
         )
         raw = response.json()
         _raise_on_gql_errors(raw)

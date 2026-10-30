@@ -35,6 +35,7 @@ class RawChatService:
             "post",
             "graphql",
             GQL.get_chats(user_id=user_id, count=count, type=type, status=status, cursor=cursor),
+            retry=True,
         )
         raw = response.json()
         _raise_on_gql_errors(raw)
@@ -45,7 +46,9 @@ class RawChatService:
         return ChatList(**data)
 
     async def get_chat(self, chat_id: str) -> Chat | None:
-        response = await self._transport.request("post", "graphql", GQL.get_chat(chat_id=chat_id))
+        response = await self._transport.request(
+            "post", "graphql", GQL.get_chat(chat_id=chat_id), retry=True
+        )
         raw = response.json()
         _raise_on_gql_errors(raw)
 
@@ -73,6 +76,7 @@ class RawChatService:
             "post",
             "graphql",
             GQL.get_chat_messages(chat_id=chat_id, count=count, after_cursor=after_cursor),
+            retry=True,
         )
         raw = response.json()
         _raise_on_gql_errors(raw)
@@ -130,6 +134,7 @@ class RawChatService:
             "post",
             "graphql",
             GQL.get_message_templates(template_type, count=count, after_cursor=after_cursor),
+            retry=True,
         )
         raw = response.json()
         _raise_on_gql_errors(raw)

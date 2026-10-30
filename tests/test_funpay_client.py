@@ -67,6 +67,14 @@ def _sent(chat_id: int) -> dict:
 
 
 class FunPayClientTests(unittest.IsolatedAsyncioTestCase):
+    def test_config_repr_hides_credentials_and_proxy(self) -> None:
+        config = FunPayClientConfig(golden_key="secret-key", proxy="http://user:pass@proxy")
+        rendered = repr(config)
+        self.assertNotIn("secret-key", rendered)
+        self.assertNotIn("user:pass", rendered)
+        self.assertNotIn("golden_key=", rendered)
+        self.assertNotIn("proxy=", rendered)
+
     def test_lot_fields_renew_writes_form(self) -> None:
         fields = LotFields(1, {"fields[summary][ru]": "Hi", "price": "10"})
         self.assertEqual(fields.title_ru, "Hi")

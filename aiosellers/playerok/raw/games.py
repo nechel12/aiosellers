@@ -33,7 +33,10 @@ class RawGamesService:
         cursor: str | None = None,
     ) -> GameList | None:
         response = await self._transport.request(
-            "post", "graphql", GQL.get_games(count=count, type=type, cursor=cursor, name=search)
+            "post",
+            "graphql",
+            GQL.get_games(count=count, type=type, cursor=cursor, name=search),
+            retry=True,
         )
         raw = response.json()
         _raise_on_gql_errors(raw)
@@ -47,7 +50,9 @@ class RawGamesService:
         if id is None and slug is None:
             raise ValueError("Can't get game without id or slug")
 
-        response = await self._transport.request("post", "graphql", GQL.get_game(id=id, slug=slug))
+        response = await self._transport.request(
+            "post", "graphql", GQL.get_game(id=id, slug=slug), retry=True
+        )
         raw = response.json()
         _raise_on_gql_errors(raw)
 
@@ -63,7 +68,7 @@ class RawGamesService:
             raise ValueError("Can't get game category without id or slug or game_id")
 
         response = await self._transport.request(
-            "post", "graphql", GQL.get_game_category(game_id=game_id, slug=slug, id=id)
+            "post", "graphql", GQL.get_game_category(game_id=game_id, slug=slug, id=id), retry=True
         )
         raw = response.json()
         _raise_on_gql_errors(raw)
@@ -94,6 +99,7 @@ class RawGamesService:
                 count=count,
                 cursor=cursor,
             ),
+            retry=True,
         )
         raw = response.json()
         _raise_on_gql_errors(raw)
@@ -136,6 +142,7 @@ class RawGamesService:
                 count=count,
                 cursor=cursor,
             ),
+            retry=True,
         )
         raw = response.json()
         _raise_on_gql_errors(raw)
@@ -168,6 +175,7 @@ class RawGamesService:
                 type=type,
                 cursor=cursor,
             ),
+            retry=True,
         )
         raw = response.json()
         _raise_on_gql_errors(raw)
@@ -200,6 +208,7 @@ class RawGamesService:
                 type=type,
                 cursor=cursor,
             ),
+            retry=True,
         )
         raw = response.json()
         _raise_on_gql_errors(raw)
@@ -219,6 +228,7 @@ class RawGamesService:
             GQL.get_game_category_options(
                 game_category_id=game_category_id,
             ),
+            retry=True,
         )
         raw = response.json()
         _raise_on_gql_errors(raw)

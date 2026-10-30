@@ -15,6 +15,7 @@ from aiosellers.ggsel.core.exceptions import (
     ApiError,
     RateLimitedError,
     RequestFailedError,
+    UnauthorizedError,
 )
 from aiosellers.ggsel.entities import Review, Sale
 from aiosellers.ggsel.entities.chat import Chat, ChatMessage
@@ -234,6 +235,41 @@ class _TransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake.calls[1][2]["token"], "first")
         self.assertEqual(fake.calls[3][2]["token"], "second")
 
+    async def test_expired_token_is_not_cached_for_an_extra_minute(self):
+        transport = self.make_transport()
+        fake = transport._client
+        response = _login_ok("first")
+        payload = response._payload
+        payload["valid_thru"] = (_now() + timedelta(seconds=30)).strftime("%Y-%m-%d %H:%M:%S")
+        response.text = json.dumps(payload)
+        second = _login_ok("second")
+        fake.responses = [response, second]
+
+        self.assertEqual(await transport.login(), "first")
+        self.assertEqual(await transport.login(), "second")
+        self.assertEqual(len(fake.calls), 2)
+
+    async def test_401_reuses_a_token_refreshed_by_another_request(self):
+        transport = self.make_transport()
+        transport._token = "second"
+        transport._token_valid_until = tls.time.monotonic() + 3600
+
+        token = await transport._token_after_unauthorized("first")
+
+        self.assertEqual(token, "second")
+        self.assertEqual(transport._token, "second")
+        self.assertEqual(transport._client.calls, [])
+
+    async def test_non_idempotent_post_is_not_repeated_after_401(self):
+        transport = self.make_transport()
+        fake = transport._client
+        fake.responses = [_login_ok(), _Response(401)]
+
+        with self.assertRaises(UnauthorizedError):
+            await transport.request("post", "/api_sellers/api/foo", json_body={}, retry=False)
+
+        self.assertEqual([call[0] for call in fake.calls], ["post", "post"])
+
     async def test_429_honours_retry_after(self):
         transport = self.make_transport()
         fake = transport._client
@@ -340,6 +376,23 @@ class _LifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(client._transport)
         self.assertTrue(_FakeTLSClient.last.closed)
+
+    async def test_concurrent_start_creates_only_one_transport(self):
+        _FakeTLSClient.responses = [_login_ok()]
+        client = GGsel(GGselClientConfig(api_key="secret", seller_id=42))
+
+        await asyncio.gather(client.start(), client.start())
+
+        fake = _FakeTLSClient.last
+        self.assertEqual(len(fake.calls), 1)
+        self.assertEqual(fake.calls[0][0], "post")
+        await client.close()
+
+    async def test_config_repr_hides_the_api_key(self):
+        config = GGselClientConfig(api_key="very-secret", seller_id=42)
+
+        self.assertNotIn("very-secret", repr(config))
+        self.assertIn("seller_id=42", repr(config))
 
 
 class _FakeChatService:
@@ -823,6 +876,78 @@ class _ListenerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(third[0].chat.id, 2)
         self.assertEqual(third[1].message.id, 20)
 
+    async def test_sales_burst_uses_the_full_api_window(self):
+        raw = _FakeRaw()
+        raw.sales.sales = [_sale(1)]
+        listener = EventListener(_client(raw))
+        await listener.tick(messages=False, reviews=False)
+
+        raw.sales.sales = [_sale(invoice_id) for invoice_id in range(2, 62)]
+        events = await listener.tick(messages=False, reviews=False)
+
+        self.assertEqual(len(events), 60)
+        self.assertEqual({event.sale.invoice_id for event in events}, set(range(2, 62)))
+        self.assertEqual(raw.sales.calls[-1]["top"], 100)
+
+    async def test_review_burst_reads_until_a_known_review(self):
+        raw = _FakeRaw()
+        raw.reviews.pages = {1: ReviewsResponse(reviews=[_review(1)])}
+        listener = EventListener(_client(raw), reviews_page_size=2)
+        await listener.tick(messages=False, sales=False)
+
+        raw.reviews.pages = {
+            1: ReviewsResponse(total_pages=3, reviews=[_review(5), _review(4)]),
+            2: ReviewsResponse(total_pages=3, reviews=[_review(3), _review(2)]),
+            3: ReviewsResponse(total_pages=3, reviews=[_review(2), _review(1)]),
+        }
+        events = await listener.tick(messages=False, sales=False)
+
+        self.assertEqual([event.review.id for event in events], [2, 3, 4, 5])
+        self.assertEqual([call["page"] for call in raw.reviews.calls], [1, 1, 2, 3])
+
+    async def test_state_read_failure_does_not_poll_or_overwrite_saved_state(self):
+        class FlakyStore:
+            def __init__(self):
+                self.data = {
+                    "version": 1,
+                    "chats": {},
+                    "chats_ready": True,
+                    "sales": [1],
+                    "sales_ready": True,
+                    "reviews": [],
+                    "reviews_ready": True,
+                }
+                self.reads = 0
+                self.writes = 0
+
+            async def get(self, key):
+                self.reads += 1
+                if self.reads == 1:
+                    raise OSError("temporarily unavailable")
+                return self.data
+
+            async def set(self, key, value):
+                self.writes += 1
+                self.data = value
+
+        store = FlakyStore()
+        raw = _FakeRaw()
+        raw.sales.sales = [_sale(1)]
+        listener = EventListener(_client(raw, store=store), state=store)
+
+        self.assertEqual(await listener.tick(messages=False, reviews=False), [])
+        self.assertEqual(raw.sales.calls, [])
+        self.assertEqual(store.writes, 0)
+
+        self.assertEqual(await listener.tick(messages=False, reviews=False), [])
+        self.assertEqual(store.reads, 2)
+        self.assertEqual(store.writes, 0)
+
+        raw.sales.sales.append(_sale(2))
+        events = await listener.tick(messages=False, reviews=False)
+        self.assertEqual([event.sale.invoice_id for event in events], [2])
+        self.assertEqual(store.writes, 1)
+
     async def test_tick_requires_a_started_client(self):
         client = GGsel(GGselClientConfig(api_key="key", seller_id=42))
         with self.assertRaises(RuntimeError):
@@ -841,6 +966,11 @@ class _DispatchTests(unittest.IsolatedAsyncioTestCase):
     async def test_initial_chat_and_text_filters(self):
         client = GGsel(GGselClientConfig(api_key="key", seller_id=42, handler_timeout=0.05))
         seen = []
+        initial = []
+
+        @client.on(GGselEvents.INITIAL_CHAT)
+        async def on_initial(event):
+            initial.append(event.chat.id)
 
         @client.on_message
         async def everything(event):
@@ -853,6 +983,7 @@ class _DispatchTests(unittest.IsolatedAsyncioTestCase):
         chat = Chat(id=1)
         await client._dispatch(InitialChatEvent(client=client, chat=chat))
         self.assertEqual(seen, [])
+        self.assertEqual(initial, [1])
 
         await client._dispatch(_message_event(client, chat, "exact"))
         self.assertEqual(seen, ["exact", "exact:exact"])

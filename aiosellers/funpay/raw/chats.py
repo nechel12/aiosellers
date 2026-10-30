@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any, Literal
 
@@ -23,6 +24,10 @@ def _error_message(response) -> str | None:
 
 
 class RawChats(RawBase):
+    def __init__(self, transport) -> None:
+        super().__init__(transport)
+        self._send_locks: dict[str, asyncio.Lock] = {}
+
     async def history(self, chat_id: int | str, last_message_id: int, *, retry: bool = True):
         async def run():
             response = await self.transport.request(
@@ -85,28 +90,31 @@ class RawChats(RawBase):
         elif text:
             request["data"]["content"] = f"{self.bot_mark}{text}"
 
+        lock = self._send_locks.setdefault(str(chat_id), asyncio.Lock())
+
         async def run():
-            before = await self._node_message_id(chat_id)
-            payload = await self.transport.request(
-                "POST",
-                "runner/",
-                data={
-                    "objects": json.dumps([]),
-                    "request": json.dumps(request),
-                },
-                headers={"content-type": "application/x-www-form-urlencoded; charset=UTF-8"},
-            )
-            data = response_json(payload)
-            try:
-                return self._sent_message(data, chat_id)
-            except MessageNotDeliveredError:
-                resp = data.get("response") if isinstance(data, dict) else None
-                if not isinstance(resp, dict) or resp.get("error"):
-                    raise
-                found = await self._message_after(chat_id, before)
-                if found is None:
-                    raise
-                return found
+            async with lock:
+                before = await self._node_message_id(chat_id)
+                payload = await self.transport.request(
+                    "POST",
+                    "runner/",
+                    data={
+                        "objects": json.dumps([]),
+                        "request": json.dumps(request),
+                    },
+                    headers={"content-type": "application/x-www-form-urlencoded; charset=UTF-8"},
+                )
+                data = response_json(payload)
+                try:
+                    return self._sent_message(data, chat_id)
+                except MessageNotDeliveredError:
+                    resp = data.get("response") if isinstance(data, dict) else None
+                    if not isinstance(resp, dict) or resp.get("error"):
+                        raise
+                    found = await self._message_after(chat_id, before)
+                    if found is None:
+                        raise
+                    return found
 
         return await self._call(run)
 

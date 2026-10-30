@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ..core.state import StateStore
 
@@ -22,7 +22,7 @@ class PlayerokClientConfig:
         state: Optional store for cursors and dedup windows that survive restarts
     """
 
-    access_token: str | None = None
+    access_token: str | None = field(default=None, repr=False)
     user_agent: str | None = None
     request_timeout: float = 10.0
     base_url: str = "https://playerok.com/"
