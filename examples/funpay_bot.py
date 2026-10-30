@@ -27,4 +27,5 @@ async def paid(event: NewOrderEvent) -> None:
         await chat.send_text(f"Привет, {event.order.buyer_username}!")
 
 
-asyncio.run(client.start_polling())
+if __name__ == "__main__":
+    asyncio.run(client.start_polling())

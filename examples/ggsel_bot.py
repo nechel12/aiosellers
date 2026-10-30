@@ -21,4 +21,5 @@ async def sold(event: NewSaleEvent) -> None:
     print(f"New sale #{event.sale.invoice_id}: {event.sale.product_name}")
 
 
-asyncio.run(client.start_polling())
+if __name__ == "__main__":
+    asyncio.run(client.start_polling())

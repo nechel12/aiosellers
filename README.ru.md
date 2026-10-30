@@ -8,6 +8,7 @@
 [![Last commit](https://img.shields.io/github/last-commit/nechel12/aiosellers)](https://github.com/nechel12/aiosellers/commits/main)
 [![Fork of Zewsic/aiosellers](https://img.shields.io/badge/fork-Zewsic%2Faiosellers-blueviolet?logo=github)](https://github.com/Zewsic/aiosellers)
 [![Security policy](https://img.shields.io/badge/security-policy-green)](SECURITY.md)
+[![CodeQL](https://github.com/nechel12/aiosellers/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/nechel12/aiosellers/security/code-scanning)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](CONTRIBUTING.md)
 
 Асинхронная Python-обёртка для цифровых торговых площадок: **FunPay**,
@@ -29,10 +30,13 @@
 PlayerOK — GraphQL и WebSocket-подписки, GGsel — официальный Seller API V1.
 В пути запросов нет прокси-сервиса, телеметрии или стороннего бэкенда.
 
-> Статус: pre-1.0. Публичный API документирован и покрыт тестами, но в минорных
-> релизах поведение ещё может меняться. См. [CHANGELOG.md](CHANGELOG.md).
+> Статус: pre-1.0. Ядро, транспорт и листенеры покрыты тестами, публичный API
+> описан в docstring'ах и README, а покрытие высокоуровневых обёрток ещё растёт.
+> В минорных релизах поведение ещё может меняться. См. [CHANGELOG.md](CHANGELOG.md).
 
 ## Установка
+
+Установка форка с GitHub (работает уже сейчас):
 
 ```bash
 pip install "git+https://github.com/nechel12/aiosellers.git"
@@ -42,6 +46,13 @@ pip install "git+https://github.com/nechel12/aiosellers.git"
 
 ```bash
 uv add "git+https://github.com/nechel12/aiosellers.git"
+```
+
+Имя дистрибутива — `aiosellers-nechel12`, импортируемый пакет по-прежнему
+`aiosellers`. После публикации первого релиза на PyPI будет работать и так:
+
+```bash
+pip install aiosellers-nechel12
 ```
 
 `pip install aiosellers` устанавливает **upstream-пакет** с PyPI, а не этот
@@ -316,9 +327,12 @@ issue.
 Нужны Python 3.12+ и [uv](https://docs.astral.sh/uv/).
 
 ```sh
-uv sync
+uv sync --locked
 uv run ruff check .
+uv run ruff format --check .
+uv run mypy aiosellers
 uv run pytest -q
+uv run pytest -q --cov=aiosellers --cov-fail-under=65
 
 uv run python examples/funpay_account.py
 uv build

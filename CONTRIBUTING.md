@@ -11,9 +11,12 @@ explain the behavior and tradeoffs in the PR description.
 - Before sending a change:
 
 ```sh
-uv sync
+uv sync --locked
 uv run ruff check .
+uv run ruff format --check .
+uv run mypy aiosellers
 uv run pytest -q
+uv run pytest -q --cov=aiosellers --cov-fail-under=65
 ```
 
 - If you touch packaging, build and inspect the artifacts:
@@ -38,7 +41,8 @@ uv run python examples/ggsel_account.py
 - Add an entry under `[Unreleased]` in `CHANGELOG.md`.
 - Do not commit secrets, `.env` files, SQLite state files, `dist/`, or build
   artifacts.
-- Keep CI green; the workflow runs `ruff check` and `pytest` on Python 3.12.
+- Keep CI green; the workflow runs `ruff check` and `pytest` on Python 3.12,
+  3.13 and 3.14 with locked dependencies, a coverage floor and a wheel smoke test.
 
 ## Adding a platform adapter
 

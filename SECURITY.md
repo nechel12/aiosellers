@@ -36,7 +36,7 @@ In scope:
   `api_key`/`seller_id`, login signing, token caching and refresh.
 - Transport security: TLS verification, redirects, retries, rate limiting and
   request signing.
-- The GGsel download host allowlist and any place where the library makes
+- The Playerok download host allowlist and any place where the library makes
   requests to user-supplied URLs.
 - Listener state: what `MemoryStateStore`/`SQLiteStateStore` persists and
   whether it can leak secrets.
@@ -62,6 +62,11 @@ ids, order snapshots and cursors; treat the SQLite file as sensitive and
 restrict its permissions. The library cannot protect credentials from the
 process that embeds it — do not log them, do not commit them, and prefer
 environment variables or a secret manager.
+
+`PlayerokTransport.download()` restricts downloads to the Playerok host
+allowlist and uses a separate client without the session cookie. In contrast,
+`prepare_image_file()` accepts arbitrary user-supplied image URLs by design;
+callers must validate untrusted URLs before passing them.
 
 ## Safe harbor
 
