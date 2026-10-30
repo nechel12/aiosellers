@@ -209,6 +209,3 @@ __marimo__/
 .idea/
 /.idea/
 .serena/
-
-# Local audit notes
-/audit.md
