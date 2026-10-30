@@ -5,7 +5,10 @@
 ## Testing
 
 - [ ] `uv run ruff check .`
+- [ ] `uv run ruff format --check .`
+- [ ] `uv run mypy aiosellers`
 - [ ] `uv run pytest -q`
+- [ ] `uv run pytest -q --cov=aiosellers --cov-fail-under=65`
 - [ ] `uv build` (if packaging changed)
 - [ ] Example run against a test account (if an example changed)
 

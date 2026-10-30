@@ -1,0 +1,49 @@
+name: publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_pypi:
+        description: Publish the built distribution to PyPI
+        type: boolean
+        default: false
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy aiosellers
+      - run: uv run pytest -q --cov=aiosellers --cov-report=term-missing --cov-fail-under=65
+      - run: uv build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  pypi:
+    needs: build
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.publish_pypi) || (github.event_name == 'push' && vars.PYPI_PUBLISH == 'true') }}
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
