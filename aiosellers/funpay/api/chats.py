@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from ...core.media_policy import resolve_media_path
 from ..core.utils import random_tag, sniff_image
 from ..entities.chat import Chat, Message
 from ..exceptions import AccountNotInitiatedError
@@ -20,7 +21,7 @@ _NODE = re.compile(r"users-(\d+)-(\d+)")
 def _load_image(image: bytes | str | Path) -> tuple[bytes, str, str]:
     if isinstance(image, bytes):
         return image, "image.png", sniff_image(image)
-    path = Path(image)
+    path = resolve_media_path(image)
     content = path.read_bytes()
     return content, path.name, sniff_image(content)
 

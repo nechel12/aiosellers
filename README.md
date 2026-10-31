@@ -112,6 +112,22 @@ also be passed directly: `Playerok("token")`, `FunPay("golden-key")` or
 Set `bot_mark=False` in `FunPayClientConfig` to stop adding the invisible bot
 marker to outgoing messages and reviews.
 
+Media arguments (`image`, `photo`) accept bytes, an uploaded-file id, a URL where
+the platform supports one, and a local path — which is read from the disk of the
+running process. A host that lets less-trusted code build those arguments can
+confine the read target with `AIOSELLERS_MEDIA_ROOTS`:
+
+```bash
+# colon-separated (os.pathsep) list of allowed directories
+export AIOSELLERS_MEDIA_ROOTS="/srv/app/media"
+# empty value: no local path is opened at all
+export AIOSELLERS_MEDIA_ROOTS=""
+```
+
+The variable is optional: unset keeps the historical behaviour of opening any
+readable path. With it set, paths outside the listed roots raise
+`MediaPathNotAllowedError` before anything is read.
+
 All adapters accept an optional `proxy` URL:
 
 ```python

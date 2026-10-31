@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- `AIOSELLERS_MEDIA_ROOTS` confines the local paths that media uploads may read.
+  FunPay and Playerok accept `str`/`Path` in `image`/`photo` and read them from the
+  disk of the running process, which is a file-exposure primitive for any host that
+  forwards less-trusted arguments into `chats.send_message`/`upload_image`. Unset
+  keeps the historical behaviour; set (including to an empty value) opens only paths
+  under the listed roots and raises `MediaPathNotAllowedError` otherwise.
+
 ## [0.3.3] - 2026-10-31
 
 ### Changed

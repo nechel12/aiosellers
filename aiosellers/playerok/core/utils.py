@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
+from ...core.media_policy import open_media
 from .exceptions import GraphQLError, PersistedQueryExpired
 from .types import ImageInput
 
@@ -152,7 +153,7 @@ async def prepare_image_file(image: ImageInput, *, proxy: str | None = None) -> 
                 raise ValueError(f"Unsupported image URL scheme: {parsed.scheme}")
             return await _download_remote_image(image, proxy=proxy)
 
-        file_obj = open(image, "rb")
+        file_obj = open_media(image)
         return file_obj, True
 
     raise TypeError(f"Unsupported image type: {type(image)}")
