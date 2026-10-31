@@ -1,0 +1,23 @@
+aiosellers-nechel12
+Copyright 2026 the aiosellers-nechel12 authors (nechel12)
+
+This product includes software developed as part of the Zewsic/aiosellers
+project (https://github.com/Zewsic/aiosellers), originally authored by
+Daniil Nikishin, licensed under the Apache License, Version 2.0. The upstream
+license text and its copyright notices are preserved in LICENSE.
+
+This fork adds, relative to upstream:
+
+- the GGsel Seller API V1 adapter;
+- `SellerHub` — one normalized `HubEvent` stream across several accounts, with
+  a per-session `platform`/`session_id`;
+- durable listener state through `StateStore` / `SQLiteStateStore`;
+- the `Capability` matrix describing what each platform supports;
+- proxy support for FunPay, Playerok and GGsel;
+- `AIOSELLERS_MEDIA_ROOTS`, which confines the local filesystem paths that media
+  uploads are allowed to read.
+
+Distributed under the Apache License, Version 2.0. See LICENSE for terms and
+conditions, and README.md / README.ru.md for the public statement that this
+repository is a fork and how it relates to the upstream `aiosellers` package on
+PyPI.

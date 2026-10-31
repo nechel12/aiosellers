@@ -432,7 +432,8 @@ for the development workflow. By participating, you agree to the
 
 ## License
 
-The code is licensed under Apache-2.0; see [LICENSE](LICENSE). The upstream
+The code is licensed under Apache-2.0; see [LICENSE](LICENSE) and
+[NOTICE](NOTICE), which lists what this fork adds relative to upstream. The upstream
 copyright and license notices are preserved. The PyPI package `aiosellers` is
 maintained by the upstream project and is not affiliated with this fork.
 
