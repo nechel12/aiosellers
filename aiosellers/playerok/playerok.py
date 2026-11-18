@@ -168,18 +168,28 @@ class Playerok:
         return EventListener(self, **listener_options).listen(messages=messages, reviews=reviews)
 
     async def start_polling(self, *, messages: bool = True, reviews: bool = True) -> None:
-        """Start the session, dispatch decorator handlers, and close on exit.
+        """Start the session and dispatch decorator handlers.
 
-        Another task can stop the loop with :meth:`stop`.
+        The session is closed on normal completion or explicit :meth:`stop`.
+        Unexpected event-feed failures are re-raised without closing the client so
+        callers can retry with the same session instead of getting
+        ``Client is not started`` on every following API call.
         """
         await self.start()
         self._polling_task = asyncio.current_task()
         try:
             async for event in self.listen(messages=messages, reviews=reviews):
                 await self._dispatch(event)
+        except asyncio.CancelledError:
+            await self.close()
+            raise
+        except Exception:
+            logger.exception("Playerok event feed stopped unexpectedly; session left open")
+            raise
+        else:
+            await self.close()
         finally:
             self._polling_task = None
-            await self.close()
 
     def stop(self) -> None:
         """Stop the loop started by :meth:`start_polling` from another task."""
