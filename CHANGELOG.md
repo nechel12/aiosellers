@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.3.5] - 2026-11-18
+
+### Fixed
+
+- Playerok public item search now sends only `APPROVED` status; the previous
+  multi-status filter made the live API return an empty page.
+- Non-JSON GraphQL responses raise a clear `GraphQLError` instead of crashing in
+  `tls_requests` with a broken `JSONDecodeError`.
+- HTTP errors now include a short response-body snippet for debugging Playerok
+  400/429/500 replies.
+- `Playerok.start_polling()` no longer closes the session on unexpected event-feed
+  failures; explicit `stop()`/cancellation still closes it.
+
 ## [0.3.4] - 2026-10-31
 
 ### Added
