@@ -250,7 +250,9 @@ class GraphQLQuery:
             filters = {
                 "gameId": game_id,
                 "gameCategoryId": category_id,
-                "status": ["APPROVED", "PENDING_MODERATION", "PENDING_APPROVAL"],
+                # Live Playerok returns an empty page when several statuses are
+                # requested together; APPROVED is the only reliable public filter.
+                "status": ["APPROVED"],
                 "withOfficial": False,
             }
         else:
