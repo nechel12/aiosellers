@@ -62,6 +62,21 @@ class ResponseParsingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         await transport.close()
 
+    async def test_multipart_operations_without_files_are_sent_as_form_data(self):
+        transport, client = self.make_transport([_Response(200, text='{"data": {}}')])
+
+        await transport.request(
+            "post",
+            "graphql",
+            {"operations": "{}", "map": "{}"},
+        )
+
+        kwargs = client.calls[0][2]
+        self.assertIn("data", kwargs)
+        self.assertEqual(kwargs["files"], {})
+        self.assertNotIn("json", kwargs)
+        await transport.close()
+
     async def test_error_message_includes_response_body(self):
         transport, _ = self.make_transport(
             [_Response(500, text="upstream exploded")]

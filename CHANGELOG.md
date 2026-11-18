@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.3.6] - 2026-11-18
+
+### Fixed
+
+- GraphQL multipart mutations with zero attachments are now sent as form data
+  instead of JSON. `createItem` always wraps its query in `operations`/`map`;
+  sending that as JSON made Playerok reject it with
+  "GraphQL operations must contain a non-empty `query` or a `persistedQuery` extension".
+
 ## [0.3.5] - 2026-11-18
 
 ### Fixed

@@ -142,11 +142,13 @@ class PlayerokTransport:
     ) -> Any:
         if method == "get":
             return await self._client.get(url=url, headers=request_headers, params=payload)
-        if files:
+        # GraphQL multipart requests use `operations`/`map` even when there are
+        # no files; tls_requests must receive them as form data, not JSON.
+        if files or ("operations" in payload and "map" in payload):
             # Let the client set proper multipart boundary.
             request_headers.pop("content-type", None)
             return await self._client.post(
-                url=url, headers=request_headers, data=payload, files=files
+                url=url, headers=request_headers, data=payload, files=files or {}
             )
         return await self._client.post(url=url, headers=request_headers, json=payload)
 
