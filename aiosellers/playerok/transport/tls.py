@@ -6,7 +6,12 @@ from urllib.parse import urljoin, urlparse
 
 from ..core.config import PlayerokConfig
 from ..core.constants import CLOUDFLARE_SIGNATURES
-from ..core.exceptions import CloudflareDetected, RateLimitedError, RequestFailedError
+from ..core.exceptions import (
+    CloudflareDetected,
+    GraphQLError,
+    RateLimitedError,
+    RequestFailedError,
+)
 
 DOWNLOAD_HOSTS_ENV = "PLAYEROK_DOWNLOAD_HOSTS"
 REQUEST_ATTEMPTS = 3
@@ -30,6 +35,17 @@ def _backoff(attempt: int, retry_after: float | None = None) -> float:
     if retry_after is not None:
         return retry_after
     return min(8.0, 0.5 * (2**attempt)) + random.uniform(0, 0.1)
+
+
+def _response_body(response: Any) -> str:
+    """Return a short printable body snippet for error messages."""
+    text = getattr(response, "text", "") or ""
+    return str(text).strip()
+
+
+def _body_suffix(response: Any) -> str:
+    body = _response_body(response)
+    return f" body={body[:200]!r}" if body else ""
 
 
 class PlayerokTransport:
@@ -174,12 +190,19 @@ class PlayerokTransport:
 
             status = getattr(response, "status_code", 200)
             if status < 400:
+                body = _response_body(response)
+                if body and not body.lstrip().startswith(("{", "[")):
+                    raise GraphQLError(
+                        f"Playerok returned non-JSON response: HTTP {status} ({url}) "
+                        f"body={body[:200]!r}"
+                    )
                 return response
 
             retry_after = _retry_after(getattr(response, "headers", None))
+            suffix = _body_suffix(response)
             if status == 429:
                 last_error = RateLimitedError(
-                    f"Playerok rate limited the request: HTTP 429 ({url})"
+                    f"Playerok rate limited the request: HTTP 429 ({url}){suffix}"
                 )
                 if attempt + 1 >= attempts:
                     raise last_error
@@ -187,13 +210,19 @@ class PlayerokTransport:
                 continue
 
             if status >= 500 and attempt + 1 < attempts:
-                last_error = RequestFailedError(f"Playerok request failed: HTTP {status} ({url})")
+                last_error = RequestFailedError(
+                    f"Playerok request failed: HTTP {status} ({url}){suffix}"
+                )
                 await asyncio.sleep(_backoff(attempt, retry_after))
                 continue
 
-            raise RequestFailedError(f"Playerok request failed: HTTP {status} ({url})")
+            raise RequestFailedError(
+                f"Playerok request failed: HTTP {status} ({url}){suffix}"
+            )
 
-        raise RequestFailedError(f"Playerok request failed: {url}: {last_error}") from last_error
+        raise RequestFailedError(
+            f"Playerok request failed: {url}: {last_error}"
+        ) from last_error
 
     async def _get_download_response(self, client: Any, url: str) -> tuple[Any, str]:
         current_url = url
