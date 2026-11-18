@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.3.7] - 2026-11-18
+
+### Changed
+
+- `uv.lock` is in sync with the package version and the `soupsieve` 4.0 security
+  bump (CVE-2026-126190). CI, dependency audit, CodeQL and wheel build are green
+  again.
+
 ## [0.3.6] - 2026-11-18
 
 ### Fixed
