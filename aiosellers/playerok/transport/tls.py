@@ -218,13 +218,9 @@ class PlayerokTransport:
                 await asyncio.sleep(_backoff(attempt, retry_after))
                 continue
 
-            raise RequestFailedError(
-                f"Playerok request failed: HTTP {status} ({url}){suffix}"
-            )
+            raise RequestFailedError(f"Playerok request failed: HTTP {status} ({url}){suffix}")
 
-        raise RequestFailedError(
-            f"Playerok request failed: {url}: {last_error}"
-        ) from last_error
+        raise RequestFailedError(f"Playerok request failed: {url}: {last_error}") from last_error
 
     async def _get_download_response(self, client: Any, url: str) -> tuple[Any, str]:
         current_url = url

@@ -78,9 +78,7 @@ class ResponseParsingTests(unittest.IsolatedAsyncioTestCase):
         await transport.close()
 
     async def test_error_message_includes_response_body(self):
-        transport, _ = self.make_transport(
-            [_Response(500, text="upstream exploded")]
-        )
+        transport, _ = self.make_transport([_Response(500, text="upstream exploded")])
 
         with self.assertRaisesRegex(RequestFailedError, "upstream exploded"):
             await transport.request("post", "graphql", {"query": "x"})
