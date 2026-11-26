@@ -92,7 +92,9 @@ class ChatAPI:
         cached = self._client.cached("chats", chat_id)
         if cached is not None:
             return cached
-        chats = await self.list(limit=100)
+        # The V1 API has no direct chat-by-id lookup.  Search a wider window
+        # than the old hard-coded first 100 before giving up.
+        chats = await self.list(limit=1000, page_size=100)
         return next((chat for chat in chats if chat.id == chat_id), None)
 
     async def history(
@@ -104,17 +106,34 @@ class ChatAPI:
         to_id: int | None = None,
         newer: bool | None = None,
     ) -> builtins.list[ChatMessage]:
+        raw = self._client._require_raw().chats
         count = min(100, max(1, limit))
-        rows = await self._client._require_raw().chats.history(
-            chat_id,
-            from_id=from_id,
-            to_id=to_id,
-            newer=newer,
-            count=count,
-        )
-        messages = [self._to_message(row, int(chat_id)) for row in rows]
+        collected: dict[int, ChatMessageSchema] = {}
+        cursor_to = to_id
+        while len(collected) < limit:
+            rows = await raw.history(
+                chat_id,
+                from_id=from_id,
+                to_id=cursor_to,
+                newer=newer,
+                count=count,
+            )
+            if not rows:
+                break
+            before = len(collected)
+            for row in rows:
+                collected[row.id] = row
+            if len(collected) == before:
+                break
+            oldest = min((row.id for row in rows), default=None)
+            if oldest is None or oldest <= 1:
+                break
+            if from_id is not None or newer:
+                break
+            cursor_to = oldest - 1
+        messages = [self._to_message(row, int(chat_id)) for row in collected.values()]
         messages.sort(key=lambda message: message.id)
-        return messages[:limit]
+        return messages[-limit:] if limit else messages
 
     async def send(self, chat_id: int | str, text: str) -> None:
         if not text.strip():

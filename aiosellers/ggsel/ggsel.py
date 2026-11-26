@@ -43,6 +43,8 @@ class _IdentityMaps:
 class GGsel:
     """High-level GGsel seller client built on the official V1 API."""
 
+    platform = "ggsel"
+
     def __init__(self, config: GGselClientConfig | str | None = None) -> None:
         if isinstance(config, str):
             config = GGselClientConfig(api_key=config)
@@ -58,9 +60,10 @@ class GGsel:
         self._lifecycle_lock = asyncio.Lock()
 
         if self._use_identity_map:
+            limit = config.identity_map_limit
             self._identity_maps = _IdentityMaps(
-                chats=IdentityMap(),
-                products=IdentityMap(),
+                chats=IdentityMap(limit),
+                products=IdentityMap(limit),
             )
 
         self.account = AccountAPI(self)
@@ -80,7 +83,12 @@ class GGsel:
             raise RuntimeError("Client is not started. Call start() or start_polling() first.")
         return self._raw
 
-    def remember(self, bucket: str, key: Any, entity: Any) -> Any:
+    def remember(self, bucket: str, key: Any, entity: Any, *, partial: bool = False) -> Any:
+        """Remember an entity and return the identity-mapped instance.
+
+        ``partial=True`` protects richer objects from being reset by list rows
+        that do not carry every field (for example, ``Product.from_row``).
+        """
         entity._client = self
         if not self._use_identity_map:
             return entity
@@ -91,7 +99,12 @@ class GGsel:
         for item in fields(entity):
             if item.name.startswith("_"):
                 continue
-            setattr(current, item.name, getattr(entity, item.name))
+            value = getattr(entity, item.name)
+            if partial and value is None:
+                continue
+            if partial and item.default is False and value is False:
+                continue
+            setattr(current, item.name, value)
         return current
 
     def cached(self, bucket: str, key: Any) -> Any | None:
@@ -150,10 +163,12 @@ class GGsel:
         sales: bool = True,
         reviews: bool = True,
         interval: float | None = None,
+        **listener_options: Any,
     ):
         if self._transport is None:
             raise RuntimeError("Client is not started. Call start() or start_polling() first.")
-        return EventListener(self, state=self._config.state).listen(
+        listener_options.setdefault("state", self._config.state)
+        return EventListener(self, **listener_options).listen(
             messages=messages,
             sales=sales,
             reviews=reviews,
@@ -166,12 +181,15 @@ class GGsel:
         messages: bool = True,
         sales: bool = True,
         reviews: bool = True,
+        **listener_options: Any,
     ) -> None:
         """Start the session, dispatch decorator handlers, and close on exit."""
         await self.start()
         self._polling_task = asyncio.current_task()
         try:
-            async for event in self.listen(messages=messages, sales=sales, reviews=reviews):
+            async for event in self.listen(
+                messages=messages, sales=sales, reviews=reviews, **listener_options
+            ):
                 await self._dispatch(event)
         finally:
             self._polling_task = None

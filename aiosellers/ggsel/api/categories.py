@@ -21,6 +21,7 @@ class CategoryAPI:
         category_id: int | None = None,
     ) -> builtins.list[Category]:
         result: builtins.list[Category] = []
+        seen: set[int] = set()
         current_page = max(1, page)
         while len(result) < limit:
             want = min(100, limit - len(result))
@@ -31,7 +32,12 @@ class CategoryAPI:
             )
             if not response.category:
                 break
+            added = 0
             for schema in response.category:
+                if schema.id in seen:
+                    continue
+                seen.add(schema.id)
+                added += 1
                 result.append(
                     Category(
                         id=schema.id,
@@ -42,7 +48,7 @@ class CategoryAPI:
                 )
                 if len(result) >= limit:
                     break
-            if len(response.category) < want:
+            if added == 0:
                 break
             current_page += 1
         return result[:limit]

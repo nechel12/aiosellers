@@ -15,8 +15,8 @@ class ProductAPI:
     def __init__(self, client: GGsel) -> None:
         self._client = client
 
-    def _remember(self, product: Product) -> Product:
-        return self._client.remember("products", product.id, product)
+    def _remember(self, product: Product, *, partial: bool = False) -> Product:
+        return self._client.remember("products", product.id, product, partial=partial)
 
     async def list(
         self,
@@ -36,7 +36,7 @@ class ProductAPI:
             if not response.rows:
                 break
             for row in response.rows:
-                result.append(self._remember(Product.from_row(row)))
+                result.append(self._remember(Product.from_row(row), partial=True))
                 if len(result) >= limit:
                     break
             if response.has_next_page is False:
@@ -71,7 +71,7 @@ class ProductAPI:
             if not response.rows:
                 break
             for row in response.rows:
-                result.append(self._remember(Product.from_row(row)))
+                result.append(self._remember(Product.from_row(row), partial=True))
                 if len(result) >= limit:
                     break
             if response.pages is not None and current_page >= response.pages:

@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
+from pydantic import ValidationError
+
 from ..core.state import StateStore
 from .core.exceptions import RateLimitedError, RequestFailedError, UnauthorizedError
 from .entities.chat import Chat
@@ -94,12 +96,13 @@ class EventListener:
         reviews: bool = True,
         interval: float | None = None,
     ) -> AsyncIterator[Any]:
-        pause = self.client._config.poll_interval if interval is None else interval
+        pause = max(0.1, self.client._config.poll_interval if interval is None else interval)
         while True:
             started = time.monotonic()
-            events = await self.tick(messages=messages, sales=sales, reviews=reviews)
+            events = await self.tick(messages=messages, sales=sales, reviews=reviews, persist=False)
             for event in events:
                 yield event
+            await self._save_state()
             remain = pause - (time.monotonic() - started)
             if remain > 0:
                 await asyncio.sleep(remain)
@@ -110,6 +113,7 @@ class EventListener:
         messages: bool = True,
         sales: bool = True,
         reviews: bool = True,
+        persist: bool = True,
     ) -> list[Any]:
         if self.client._transport is None:
             raise RuntimeError("Client is not started. Call start() or start_polling() first.")
@@ -132,10 +136,13 @@ class EventListener:
                 except RateLimitedError:
                     logger.warning("GGsel rate limited while polling")
                     break
-                except RequestFailedError as exc:
+                except (RequestFailedError, ValidationError) as exc:
                     logger.warning("GGsel poll failed: %s", exc)
+                except Exception:
+                    logger.exception("GGsel poll collector failed")
         finally:
-            await self._save_state()
+            if persist:
+                await self._save_state()
         return events
 
     async def _chat_events(self) -> list[Any]:
@@ -148,12 +155,12 @@ class EventListener:
             for item in items:
                 try:
                     state = await self._baseline_chat(item)
-                except (RateLimitedError, RequestFailedError) as exc:
+                except (RateLimitedError, RequestFailedError, ValidationError) as exc:
                     logger.warning("GGsel chat %s baseline failed: %s", item.id_i, exc)
                     continue
                 chat = self.client.chats._to_chat(item)
                 events.append(InitialChatEvent(client=self.client, chat=chat))
-                self._chats[item.id_i] = state
+                self._store_chat_state(item.id_i, state)
             return events
 
         changed = False
@@ -163,12 +170,12 @@ class EventListener:
                 chat = self.client.chats._to_chat(item)
                 try:
                     state, new_events = await self._new_chat_state(item, chat)
-                except (RateLimitedError, RequestFailedError) as exc:
+                except (RateLimitedError, RequestFailedError, ValidationError) as exc:
                     logger.warning("GGsel chat %s history failed: %s", item.id_i, exc)
                     continue
                 events.append(InitialChatEvent(client=self.client, chat=chat))
                 events.extend(new_events)
-                self._chats[item.id_i] = state
+                self._store_chat_state(item.id_i, state)
                 changed = True
                 continue
 
@@ -177,7 +184,7 @@ class EventListener:
 
             try:
                 rows = await self._messages_after(item.id_i, known.last_id)
-            except (RateLimitedError, RequestFailedError) as exc:
+            except (RateLimitedError, RequestFailedError, ValidationError) as exc:
                 logger.warning("GGsel chat %s history failed: %s", item.id_i, exc)
                 continue
 
@@ -198,6 +205,11 @@ class EventListener:
             self._mark_state_dirty()
         return events
 
+    def _store_chat_state(self, chat_id: int, state: _ChatState) -> None:
+        self._chats[chat_id] = state
+        while len(self._chats) > self.state_limit:
+            self._chats.pop(next(iter(self._chats)))
+
     async def _new_chat_state(self, item: ChatItem, chat: Chat) -> tuple[_ChatState, list[Any]]:
         if not self._recent(item.last_message):
             return await self._baseline_chat(item), []
@@ -206,6 +218,8 @@ class EventListener:
         events: list[Any] = []
         for row in rows:
             if row.seller and not self.include_own:
+                continue
+            if not self._recent(row.date_written):
                 continue
             message = self.client.chats._to_message(row, item.id_i)
             events.append(NewMessageEvent(client=self.client, chat=chat, message=message))
@@ -232,6 +246,11 @@ class EventListener:
             if not response.items:
                 break
             page += 1
+        if page > self.chat_page_limit:
+            logger.warning(
+                "GGsel chat list reached the configured page limit (%s); older chats are not polled",
+                self.chat_page_limit,
+            )
         return items
 
     async def _baseline_chat(self, item: ChatItem) -> _ChatState:
@@ -307,6 +326,11 @@ class EventListener:
         if not fresh:
             return []
         seen = set(ids)
+        if len(fresh) >= self.sales_top:
+            logger.warning(
+                "GGsel returned a full sales window (%s); newer sales may hide older ones",
+                self.sales_top,
+            )
         self._sales = (ids + [sale_id for sale_id in self._sales if sale_id not in seen])[
             : self.state_limit
         ]
@@ -343,6 +367,10 @@ class EventListener:
         fresh = [row for row in rows if row.id not in known]
         if not fresh:
             return []
+        if len(fresh) >= self.reviews_page_size * self.review_page_limit:
+            logger.warning(
+                "GGsel review burst reached the configured page limit; some older reviews may be missing"
+            )
         seen = set(ids)
         self._reviews = (ids + [review_id for review_id in self._reviews if review_id not in seen])[
             : self.state_limit
@@ -402,10 +430,12 @@ class EventListener:
                 count=None if row.get("count") is None else int(row["count"]),
             )
         self._chats = chats
+        while len(self._chats) > self.state_limit:
+            self._chats.pop(next(iter(self._chats)))
         self._chats_ready = bool(data.get("chats_ready"))
-        self._sales = self._id_list(data.get("sales"), "sales")
+        self._sales = self._id_list(data.get("sales"), "sales")[: self.state_limit]
         self._sales_ready = bool(data.get("sales_ready"))
-        self._reviews = self._id_list(data.get("reviews"), "reviews")
+        self._reviews = self._id_list(data.get("reviews"), "reviews")[: self.state_limit]
         self._reviews_ready = bool(data.get("reviews_ready"))
 
     @staticmethod
