@@ -1183,9 +1183,7 @@ class EventListener:
         token = transport._access_token if transport is not None else ""
         config = getattr(transport, "config", None)
         user_agent = getattr(config, "user_agent", None) or "aiosellers"
-        origin = getattr(config, "origin", None) or "https://playerok.com"
         return {
-            "Origin": origin,
             "Cookie": f"token={token}",
             "User-Agent": user_agent,
         }

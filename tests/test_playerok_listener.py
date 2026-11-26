@@ -5,8 +5,13 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest import mock
 
+from websockets.client import ClientProtocol
+from websockets.server import ServerProtocol
+from websockets.uri import parse_uri
+
 from aiosellers.playerok.api.chats import ChatAPI
 from aiosellers.playerok.api.deals import DealAPI
+from aiosellers.playerok.core.config import PlayerokConfig
 from aiosellers.playerok.events import ChatInitializedEvent, NewMessageEvent, NewReviewEvent
 from aiosellers.playerok.listener import EventListener
 from aiosellers.playerok.schemas import Chat as ChatSchema
@@ -206,6 +211,38 @@ class SocketLifecycleTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(self._drain(listener), 1)
 
         self.assertEqual(connect.call_args.kwargs["proxy"], proxy)
+
+    async def test_custom_origin_and_port_produce_a_valid_handshake(self):
+        listener = EventListener(_Client())
+        listener.client._transport = SimpleNamespace(
+            _access_token="token",
+            config=PlayerokConfig(base_url="http://[::1]:8765/api/"),
+        )
+        socket = _Socket(listener, stop_on_enter=True)
+        with mock.patch("websockets.connect", return_value=socket) as connect:
+            await asyncio.wait_for(self._drain(listener), 1)
+
+        self.assertEqual(connect.call_args.args[0], "ws://[::1]:8765/api/graphql")
+        kwargs = connect.call_args.kwargs
+        client = ClientProtocol(parse_uri(connect.call_args.args[0]), origin=kwargs["origin"])
+        request = client.connect()
+        request.headers.update(kwargs["additional_headers"])
+        self.assertEqual(request.headers.get_all("Origin"), ["http://[::1]:8765"])
+        self.assertEqual(ServerProtocol().accept(request).status_code, 101)
+
+    def test_official_websocket_and_explicit_override(self):
+        self.assertEqual(
+            PlayerokConfig(base_url="https://playerok.com/").ws_url,
+            "wss://ws.playerok.com/graphql",
+        )
+        self.assertEqual(
+            PlayerokConfig(base_url="https://notplayerok.com/").ws_url,
+            "wss://notplayerok.com/graphql",
+        )
+        self.assertEqual(
+            PlayerokConfig(base_url="https://playerok.com/", ws_url="wss://example.test/ws").ws_url,
+            "wss://example.test/ws",
+        )
 
     async def test_connection_error_reconnects(self):
         listener = EventListener(_Client())

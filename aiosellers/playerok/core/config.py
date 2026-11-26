@@ -24,13 +24,21 @@ class PlayerokConfig:
         )
         parsed = urlparse(self.base_url)
         host = (parsed.hostname or "playerok.com").lower()
+        origin_scheme = parsed.scheme if parsed.scheme in {"http", "https"} else "https"
+        ws_scheme = "ws" if origin_scheme == "http" else "wss"
+        authority = f"[{host}]" if ":" in host else host
+        port = parsed.port
+        if port is not None:
+            authority = f"{authority}:{port}"
+        self.origin = f"{origin_scheme}://{authority}"
+
+        official = host == "playerok.com" or host.endswith(".playerok.com")
+        base_path = parsed.path.rstrip("/")
         self.ws_url = ws_url or (
             "wss://ws.playerok.com/graphql"
-            if host.endswith("playerok.com")
-            else f"wss://{host}/graphql"
+            if official and origin_scheme == "https" and port in (None, 443) and not base_path
+            else f"{ws_scheme}://{authority}{base_path}/graphql"
         )
-        origin_scheme = parsed.scheme if parsed.scheme in {"http", "https"} else "https"
-        self.origin = f"{origin_scheme}://{host}"
         self.proxy = proxy
 
     @property
