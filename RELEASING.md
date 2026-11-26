@@ -1,8 +1,8 @@
 # Releasing
 
-The tag workflow builds the distribution; publishing to PyPI is gated by the
-repository variable `PYPI_PUBLISH` so a missing Trusted Publisher cannot break
-ordinary tags.
+The release workflow builds the distribution for version tags. A tag build
+publishes to PyPI only when the repository variable `PYPI_PUBLISH` is `true`
+and Trusted Publishing is configured.
 
 1. **Prepare**
    - Update `CHANGELOG.md`: move `[Unreleased]` items under the new version and
@@ -46,8 +46,7 @@ On Windows, use a temporary directory and the `Scripts\python.exe` /
    - Verify the published version on PyPI and the README badges.
 
 5. **Rollback**
-   - Reinstall the previous tag (for example, the tag before the current one)
-     or the previous PyPI release. Tags make rollback deterministic.
+    - Install a previously published version from PyPI or pin an earlier Git tag.
 
 ## Signed tags
 
@@ -80,8 +79,8 @@ GitHub marks the tag as Verified after the public key is added under
 ## PyPI name
 
 `aiosellers-nechel12` is the distribution name; `aiosellers` remains the import
-package. This avoids a conflict with the upstream `aiosellers` project while
-keeping the public API compatible.
+package. Do not install the fork and the upstream distribution in the same
+environment because both install the same import package.
 
 ## Versioning
 

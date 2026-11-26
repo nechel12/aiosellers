@@ -1,6 +1,6 @@
 # Migration from upstream aiosellers
 
-The fork keeps the import package `aiosellers` and the familiar adapter names.
+The fork retains the `aiosellers` import package and the upstream adapter names.
 The **distribution** name is different, but both distributions install the
 same import package. Uninstall upstream first or use a separate environment;
 do not install both in one environment.
@@ -24,18 +24,18 @@ import aiosellers
 
 - `SellerHub.stream()` no longer deadlocks when the consumer leaves the stream
   while the bounded queue is full.
-- `Chat.iter_messages()` now works and returns an async iterator. Use it with
+- `Chat.iter_messages()` returns an async iterator. Use it with
   `async for`; do not `await` the method itself.
 - `Account.lastItemCreatedAt` accepts `null`, which is required for sellers
   without items.
-- Custom Playerok/GGsel `base_url` values without a trailing slash are
+- Custom PlayerOK and GGsel `base_url` values without a trailing slash are
   normalized.
 - `SQLiteStateStore("~/state.db")` expands `~`.
 - `stop()` is available on every client.
 - GGsel is part of the shared `Platform`/`EventKind`/`SellerHub` model.
 - The distribution is `aiosellers-nechel12`; the import package is still
   `aiosellers`.
-- CI now enforces formatting, mypy, coverage and Python 3.12/3.13/3.14.
+- CI checks formatting, types, and coverage on Python 3.12, 3.13, and 3.14.
 
 ## Upgrade steps
 
@@ -52,7 +52,7 @@ import aiosellers
 
 ## State compatibility
 
-The listener state schema version is still `1`. Existing keys work:
+The listener state schema remains at version `1` and uses the following keys:
 
 ```text
 funpay:{account_id}:listener

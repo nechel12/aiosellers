@@ -20,7 +20,7 @@
 - [Быстрый старт: FunPay](#быстрый-старт-funpay)
 - [Быстрый старт: GGsel](#быстрый-старт-ggsel)
 - [Хаб для нескольких аккаунтов](#хаб-для-нескольких-аккаунтов)
-- [Персистентное состояние листенеров](#персистентное-состояние-листенеров)
+- [Состояние слушателей между запусками](#состояние-слушателей-между-запусками)
 - [Примеры](#примеры)
 - [Статус разработки: PlayerOK](#статус-разработки-playerok)
 - [Статус разработки: FunPay](#статус-разработки-funpay)
@@ -38,19 +38,20 @@
 > [Zewsic/aiosellers](https://github.com/Zewsic/aiosellers), который
 > поддерживает [@nechel12](https://github.com/nechel12). В форке добавлены
 > адаптер GGsel, общий слой `aiosellers.core` (платформы, возможности,
-> `SellerHub`), персистентное состояние листенеров, усиление транспорта и
-> тесты. Пакет `aiosellers` на PyPI публикует upstream-проект, и он **не**
-> содержит этих изменений; форк распространяется как `aiosellers-nechel12`
+> `SellerHub`), сохранение состояния слушателей, изменения транспорта и
+> тесты. Пакет `aiosellers` на PyPI публикует исходный проект; он не
+> содержит этих изменений. Форк распространяется как `aiosellers-nechel12`
 > (см. [Установку](#установка)).
 
 Стек: **Python 3.12+**, asyncio, Pydantic v2, TLS-запросы, websockets и SQLite.
 Библиотека общается с площадками напрямую: FunPay — HTTP-формы и разбор HTML,
 PlayerOK — GraphQL и WebSocket-подписки, GGsel — официальный Seller API V1.
-В пути запросов нет прокси-сервиса, телеметрии или стороннего бэкенда.
+Библиотека не требует отдельного сервера или прокси-сервиса и не собирает
+телеметрию.
 
-> Статус: pre-1.0. Ядро, транспорт и листенеры покрыты тестами, публичный API
-> описан в docstring'ах и README, а покрытие высокоуровневых обёрток ещё растёт.
-> В минорных релизах поведение ещё может меняться. См. [CHANGELOG.md](CHANGELOG.md).
+> Статус: до версии 1.0. Тесты покрывают ядро, транспорт и слушатели
+> событий. Покрытие высокоуровневого API пока неполное. Поведение может
+> меняться в минорных выпусках. См. [CHANGELOG.md](CHANGELOG.md).
 
 ## Установка
 
@@ -58,7 +59,7 @@ PlayerOK — GraphQL и WebSocket-подписки, GGsel — официальн
 
 ```bash
 pip install aiosellers-nechel12
-# или в проекте на uv:
+# Or, in a uv project:
 uv add aiosellers-nechel12
 ```
 
@@ -77,8 +78,8 @@ pip install "git+https://github.com/nechel12/aiosellers.git"
 ## Документация
 
 - [Обзор API](docs/API.md) — публичные точки входа и модули.
-- [Миграция с upstream](docs/MIGRATION.md) — имя установки, изменения поведения
-  и шаги обновления.
+- [Переход с исходного проекта](docs/MIGRATION.md) — имя дистрибутива, изменения
+  поведения и порядок обновления.
 
 ## Настройка
 
@@ -95,24 +96,24 @@ export GGSEL_SELLER_ID="123456"
 можно передать и напрямую: `Playerok("token")`, `FunPay("golden-key")` или
 `GGsel(GGselClientConfig(api_key="key", seller_id=123456))`.
 
-Укажи `bot_mark=False` в `FunPayClientConfig`, чтобы не добавлять невидимую
-бот-метку в исходящие сообщения и отзывы.
+Параметр `bot_mark=False` в `FunPayClientConfig` отключает невидимую метку
+в исходящих сообщениях и отзывах.
 
-Аргументы медиа (`image`, `photo`) принимаются как bytes, id уже загруженного
-файла, URL (там, где площадка его умеет) и локальный путь — последний читается с
-диска того процесса, который работает с библиотекой. Если параметры формирует
-менее доверенный код, чтение можно ограничить переменной `AIOSELLERS_MEDIA_ROOTS`:
+Параметры `image` и `photo` могут принимать `bytes`, идентификатор загруженного
+файла, URL или локальный путь в зависимости от метода и площадки. Локальный
+файл читает процесс, использующий библиотеку. Чтобы ограничить доступ к файлам,
+задайте `AIOSELLERS_MEDIA_ROOTS`:
 
 ```bash
-# список каталогов через os.pathsep
+# List of allowed directories separated by os.pathsep.
 export AIOSELLERS_MEDIA_ROOTS="/srv/app/media"
-# пустое значение: локальные пути не открываются вообще
+# An empty value disables local file access.
 export AIOSELLERS_MEDIA_ROOTS=""
 ```
 
-Переменная необязательна: если она не задана, поведение прежнее — открывается
-любой читаемый путь. Если задана, путь вне перечисленных каталогов вызывает
-`MediaPathNotAllowedError` до любого чтения.
+Если переменная не задана, доступны все пути, которые процесс может читать.
+При заданной переменной попытка открыть путь за пределами разрешённых
+каталогов вызывает `MediaPathNotAllowedError` до чтения файла.
 
 Все адаптеры принимают необязательный URL прокси:
 
@@ -122,7 +123,8 @@ Playerok(PlayerokClientConfig(access_token="...", proxy="http://proxy:8080"))
 GGsel(GGselClientConfig(api_key="...", seller_id=123456, proxy="http://proxy:8080"))
 ```
 
-Playerok использует его для HTTP, загрузок, скачиваний и WebSocket-подписок;
+PlayerOK использует его для HTTP-запросов, отправки и скачивания файлов,
+а также WebSocket-подписок;
 GGsel — для ApiLogin и всех запросов Seller API. Учётные данные прокси не
 попадают в `repr` конфигурации.
 
@@ -179,7 +181,7 @@ import asyncio
 from aiosellers.ggsel import GGsel
 
 async def main() -> None:
-    # Или GGselClientConfig(api_key="...", seller_id=123456)
+    # Or pass GGselClientConfig(api_key="...", seller_id=123456).
     async with GGsel() as client:
         balance = await client.account.balance()
         print(f"Seller {client.seller_id}: free={balance.free} locked={balance.locked}")
@@ -195,17 +197,18 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-`GGsel()` читает `GGSEL_API_KEY` и `GGSEL_SELLER_ID`; чтобы переопределить
-значения, передай `GGselClientConfig`. `client.seller_id` появляется после
-запуска клиента, а `client.products.update_price()` / `update_prices()`
-возвращают id задачи, который можно проверить через
+`GGsel()` читает `GGSEL_API_KEY` и `GGSEL_SELLER_ID`. Значения можно
+переопределить через `GGselClientConfig`. `client.seller_id` становится
+доступен после запуска клиента. Методы `client.products.update_price()` и
+`update_prices()` возвращают идентификатор задачи, статус которой можно
+проверить через
 `client.products.task_status()`.
 
 ## Хаб для нескольких аккаунтов
 
-`SellerHub` запускает несколько сессий FunPay, Playerok и GGsel вместе и
-объединяет их события в один поток. Каждый элемент несёт платформу и id
-сессии, а полезная нагрузка остаётся исходным типизированным событием.
+`SellerHub` запускает несколько сессий FunPay, PlayerOK и GGsel и объединяет
+их события в один поток. Каждый элемент содержит платформу, идентификатор
+сессии и исходное событие с сохранением его типа.
 
 ```python
 import asyncio
@@ -244,14 +247,14 @@ async def main():
 asyncio.run(main())
 ```
 
-`item.kind` — переносимый `EventKind` (`MESSAGE`, `REVIEW`, `ORDER`, `DEAL`, ...).
-`Session.capabilities` показывает, что поддерживает платформа, чтобы общий код
-не ветвился по её имени. У клиентов также есть `stop()`, который завершает
+`item.kind` указывает общий для адаптеров тип события `EventKind` (`MESSAGE`,
+`REVIEW`, `ORDER`, `DEAL`, ...). `Session.capabilities` позволяет проверять
+возможности площадки по флагам, а не по её имени. Метод `stop()` завершает
 `start_polling()` из другой задачи.
 
-## Персистентное состояние листенеров
+## Состояние слушателей между запусками
 
-Передай `StateStore` в конфиг клиента, чтобы сохранять курсоры чатов,
+Укажите `StateStore` в конфигурации клиента, чтобы сохранять курсоры чатов,
 обработанные ID сообщений и статусы заказов между перезапусками процесса. Без
 хранилища слушатели по-прежнему выдают новые события, но собирают начальное
 состояние заново при каждом запуске. Восстановление ограничено глубиной истории
@@ -278,17 +281,17 @@ async def main():
         GGselClientConfig(api_key="...", seller_id=123456, state=store)
     )
 
-    # ... запускаем клиентов ...
+    # Run the clients here.
 
     await store.close()
 
 asyncio.run(main())
 ```
 
-`MemoryStateStore` повторяет ту же семантику в памяти процесса — удобно для
-тестов. Ключи состояния: `funpay:{account_id}:listener`,
-`playerok:{user_id}:listener` и `ggsel:{seller_id}:listener`; битый снимок
-игнорируется с предупреждением, а неудачная запись не останавливает опрос.
+`MemoryStateStore` хранит данные в памяти процесса и подходит для тестов.
+Ключи состояния: `funpay:{account_id}:listener`, `playerok:{user_id}:listener`
+и `ggsel:{seller_id}:listener`. Некорректный снимок состояния игнорируется с
+предупреждением. Ошибка записи не останавливает опрос.
 
 ## Примеры
 
@@ -305,7 +308,7 @@ asyncio.run(main())
 | [`funpay_account.py`](examples/funpay_account.py) | Профиль, баланс, транзакции |
 | [`funpay_orders.py`](examples/funpay_orders.py) | Продажи и карточка заказа |
 | [`funpay_chats.py`](examples/funpay_chats.py) | Чаты и история сообщений |
-| [`funpay_lots.py`](examples/funpay_lots.py) | Твои лоты |
+| [`funpay_lots.py`](examples/funpay_lots.py) | Лоты продавца |
 | [`funpay_bot.py`](examples/funpay_bot.py) | Новый заказ и ответ в чате |
 | [`funpay_reviews.py`](examples/funpay_reviews.py) | Ответ на новый отзыв |
 | [`funpay_backtest.py`](examples/funpay_backtest.py) | Воспроизведение сохранённой истории чата |
@@ -344,9 +347,9 @@ uv run python examples/ggsel_account.py
 
 ## Статус разработки: GGsel
 
-GGsel покрыт официальным Seller API V1 (`https://seller.ggsel.com/`). Вебхуков
-нет, поэтому листенер опрашивает чаты, продажи и отзывы с персистентными
-курсорами, если настроен `StateStore`.
+Адаптер GGsel использует официальный Seller API V1 (`https://seller.ggsel.com/`).
+Вместо вебхуков он опрашивает чаты, продажи и отзывы. Если задан `StateStore`,
+адаптер сохраняет курсоры между запусками.
 
 | Модуль                  | Raw API | High-level |
 |:------------------------|:-------:|:----------:|
@@ -359,22 +362,19 @@ GGsel покрыт официальным Seller API V1 (`https://seller.ggsel.c
 | **Reviews**             |    ✅    |     ✅      |
 | **Event Feed**          |    ✅    |     ✅      |
 
-Пока не реализованы: V2 offer API (создание и редактирование офферов) и
-устаревший XML-эндпоинт `/xml/shop_search.asp`. V1-адаптера достаточно для
-обработки заказов, переписки, отзывов и обновления цен.
+Не поддерживаются: Offer API V2 (создание и редактирование предложений) и
+устаревший XML-эндпоинт `/xml/shop_search.asp`.
 
 ## Ограничения
 
-- У FunPay и PlayerOK нет официальных seller API; эти адаптеры используют те же
-  HTTP-формы, GraphQL-документы и WebSocket-потоки, что и сайты. Изменения на
-  площадках могут их сломать, поэтому версию фиксируют и следят за
-  [CHANGELOG](CHANGELOG.md).
-- GGsel реализован только для Seller API V1.
-- Библиотека — клиент, а не планировщик: цикл событий, деплой, масштабирование
-  и присмотр за ботами остаются на стороне использующего приложения.
-- Правила площадок, лимиты и блокировки аккаунтов вне контроля библиотеки.
-  Ответственность за запросы к API площадок и риск блокировки аккаунта лежат на
-  использующей их стороне.
+- Адаптеры FunPay и PlayerOK используют неофициальные интерфейсы сайтов:
+  HTTP-формы, GraphQL и WebSocket-потоки. Изменения этих интерфейсов могут
+  нарушить совместимость. См. [CHANGELOG](CHANGELOG.md).
+- Адаптер GGsel поддерживает только Seller API V1.
+- Библиотека не управляет развёртыванием, планированием,
+  масштабированием или контролем работы ботов.
+- Площадки устанавливают правила использования, ограничения частоты
+  запросов и правила блокировки аккаунтов.
 
 ## Безопасность
 
@@ -402,42 +402,40 @@ uv build
 
 Структура: `aiosellers/core` (платформы, события, хаб, хранилища состояния),
 `aiosellers/funpay`, `aiosellers/playerok`, `aiosellers/ggsel` (в каждом —
-`api`, `raw`, `schemas`, `entities`, транспорт и листенер), `tests/` и
+`api`, `raw`, `schemas`, `entities`, транспорт и слушатель событий), `tests/` и
 `examples/`.
 
 ## Связанные проекты
 
-- [Zewsic/aiosellers](https://github.com/Zewsic/aiosellers) — upstream-проект,
-  от которого сделан этот форк.
-- [PlayerokAPI](https://github.com/alleexxeeyy/PlayerokAPI/) — референс по API
+- [Zewsic/aiosellers](https://github.com/Zewsic/aiosellers) — исходный проект.
+- [PlayerokAPI](https://github.com/alleexxeeyy/PlayerokAPI/) — библиотека для
   PlayerOK.
-- [FunPayAPI](https://github.com/LIMBODS/FunPayAPI) — референс по API FunPay.
-- [FunPayCardinal](https://github.com/sidor0912/FunPayCardinal) — FunPay-бот на
-  тех же идеях.
+- [FunPayAPI](https://github.com/LIMBODS/FunPayAPI) — библиотека для FunPay.
+- [FunPayCardinal](https://github.com/sidor0912/FunPayCardinal) — бот для FunPay.
 - [fpx](https://github.com/funpayx/fpx) — ещё один клиент FunPay.
 
 ## Участие
 
-Для публичных багрепортов и предложений используйте
+Для публичных отчётов об ошибках и предложений используйте
 [формы GitHub Issues](https://github.com/nechel12/aiosellers/issues/new/choose).
 Локальные проверки и порядок подачи pull request описаны в
 [CONTRIBUTING.md](CONTRIBUTING.md), правила участия — в
-[Кодексе поведения](CODE_OF_CONDUCT.md). Мейнтейнерам пригодится
+[Кодексе поведения](CODE_OF_CONDUCT.md). Порядок публикации версий описан в
 [RELEASING.md](RELEASING.md).
 
 ## Лицензия
 
-Код распространяется под Apache-2.0; см. [LICENSE](LICENSE) и
-[NOTICE](NOTICE) с перечнем изменений относительно upstream. Копирайт и
-лицензионные уведомления upstream сохранены. Пакет `aiosellers` на PyPI
-поддерживает upstream-проект, он не связан с этим форком.
+Код распространяется по лицензии Apache-2.0. См. [LICENSE](LICENSE) и
+[NOTICE](NOTICE) с перечнем изменений относительно исходного проекта.
+Уведомления об авторских правах и лицензии сохранены. На PyPI пакет
+`aiosellers` относится к исходному проекту, а `aiosellers-nechel12` — к форку.
 
 ---
 
 ## Поддержать проект
 
-All-In-One Sellers API — бесплатный проект с открытым исходным кодом. Если он
-экономит время, разработку можно поддержать:
+Проект распространяется с открытым исходным кодом. Финансовая поддержка
+добровольна:
 
 <p align="center">
   <a href="https://boosty.to/nechel12/donate">
@@ -455,5 +453,5 @@ All-In-One Sellers API — бесплатный проект с открытым
 | **BNB Smart Chain** | `0x423aF840f67355371bf32480744A84069dfab5ff` |
 
 > [!WARNING]
-> Отправляй только соответствующий актив в указанной сети. Переводы в другую
-> сеть восстановить нельзя.
+> Отправляйте только соответствующий актив в указанной сети. Перевод в
+> другую сеть может быть невозможно восстановить.

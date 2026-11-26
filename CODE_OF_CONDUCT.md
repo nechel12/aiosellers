@@ -2,14 +2,14 @@
 
 ## Our commitment
 
-We want participation in this project to be respectful and constructive,
-regardless of experience level, background, or identity.
+This project is open to participants of all experience levels, backgrounds,
+and identities. Participants are expected to treat one another with respect.
 
 ## Expected behavior
 
 - Be respectful and assume good faith.
 - Keep discussions technical and on topic.
-- Give actionable feedback and accept feedback gracefully.
+- Give specific, actionable feedback and respond to feedback constructively.
 - Respect privacy: do not publish other people's API keys, golden keys, access
   tokens, chat contents, or personal data.
 
@@ -17,7 +17,7 @@ regardless of experience level, background, or identity.
 
 - Harassment, discrimination, personal attacks, or threats.
 - Publishing private information or credentials without permission.
-- Deliberately disruptive behavior, spam, or bad-faith reports.
+- Deliberately disruptive behavior, spam, or knowingly submitting false reports.
 - Encouraging or assisting abuse of platform accounts or APIs.
 
 ## Enforcement
@@ -31,8 +31,8 @@ elsewhere.
 ## Reporting a concern
 
 Do not post sensitive incident details or personal data in public issues or
-pull requests. Contact [@nechel12](https://github.com/nechel12) through a
-private channel if you already have one, or ask how to reach the maintainer
-privately without posting details. For abuse on GitHub, you can also use
+pull requests. If you need to contact [@nechel12](https://github.com/nechel12)
+privately, request a private channel without sharing incident details. For abuse
+on GitHub, use
 [GitHub's reporting tools](https://docs.github.com/en/communities/maintaining-your-safety-on-github/reporting-abuse-or-spam).
 Maintainers should limit access to a report to people who need it to respond.

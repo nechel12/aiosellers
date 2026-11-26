@@ -38,20 +38,20 @@ a multi-account event stream and persistent listener state.
 > [Zewsic/aiosellers](https://github.com/Zewsic/aiosellers), maintained by
 > [@nechel12](https://github.com/nechel12). The fork adds the GGsel adapter, the
 > shared `aiosellers.core` layer (platforms, capabilities, `SellerHub`), durable
-> listener state, transport hardening and tests. The `aiosellers` package on PyPI
+> listener state, transport changes, and tests. The `aiosellers` package on PyPI
 > is published by the upstream project and does **not** contain these changes;
 > the fork is distributed as `aiosellers-nechel12` (see
 > [Installation](#installation)).
 
 Stack: **Python 3.12+**, asyncio, Pydantic v2, TLS requests, websockets and
-SQLite. The library talks to the platforms directly: FunPay over HTTP forms and
+SQLite. The library connects to the platforms directly: FunPay over HTTP forms and
 HTML parsing, PlayerOK over GraphQL and WebSocket subscriptions, GGsel over the
-official Seller API V1. There is no proxy service, telemetry, or third-party
-backend in the request path.
+official Seller API V1. The library does not collect telemetry or require a
+separate server or proxy service.
 
-> Status: pre-1.0. The core, transports and listeners are covered by tests, and
-> the public API is documented in docstrings and this README; coverage of the
-> high-level wrappers is still growing. Minor releases may still change behavior.
+> Status: pre-1.0. Tests cover the core, transports, and event listeners.
+> Coverage of the high-level API is incomplete. Behavior may change in minor
+> releases.
 > See [CHANGELOG.md](https://github.com/nechel12/aiosellers/blob/main/CHANGELOG.md).
 
 ## Installation
@@ -124,9 +124,9 @@ Playerok(PlayerokClientConfig(access_token="...", proxy="http://proxy:8080"))
 GGsel(GGselClientConfig(api_key="...", seller_id=123456, proxy="http://proxy:8080"))
 ```
 
-Playerok uses it for HTTP, uploads, downloads and WebSocket subscriptions; GGsel
-uses it for ApiLogin and every Seller API request. Proxy credentials are omitted
-from config `repr`.
+PlayerOK uses it for HTTP requests, uploads, downloads, and WebSocket
+subscriptions. GGsel uses it for ApiLogin and all Seller API requests. Proxy
+credentials are omitted from configuration representations (`repr`).
 
 PlayerOK skips the seller's own messages by default. Set `include_own=True` in
 `PlayerokClientConfig` or pass it to `listen()` or `start_polling()` to see them.
@@ -205,7 +205,7 @@ populated after the client starts, and `client.products.update_price()` /
 
 ## Multi-account hub
 
-`SellerHub` runs several FunPay, Playerok and GGsel sessions together and merges
+`SellerHub` runs several FunPay, PlayerOK, and GGsel sessions together and merges
 their events into one stream. Every item carries the platform and session id,
 while the payload stays the original typed event.
 
@@ -280,7 +280,7 @@ async def main():
         GGselClientConfig(api_key="...", seller_id=123456, state=store)
     )
 
-    # ... run the clients ...
+    # Run the clients here.
 
     await store.close()
 
@@ -361,21 +361,19 @@ durable cursors when a `StateStore` is configured.
 | **Reviews**             |    ✅    |     ✅      |
 | **Event Feed**          |    ✅    |     ✅      |
 
-Not implemented yet: the V2 offer API (offer creation/editing) and the legacy
-XML `/xml/shop_search.asp` endpoint. The V1 adapter is enough for order
-processing, messaging, reviews and price updates.
+The adapter does not support Offer API V2 (creating and editing offers) or
+the legacy XML endpoint `/xml/shop_search.asp`.
 
 ## Limitations
 
-- FunPay and PlayerOK do not provide official seller APIs; those adapters rely
-  on the same HTTP forms, GraphQL documents and WebSocket feeds the websites
-  use. Platform changes can break them, so pin a version and watch the
+- The FunPay and PlayerOK adapters rely on unofficial website interfaces:
+  HTTP forms, GraphQL, and WebSocket feeds. Changes to these interfaces may
+  affect compatibility. See the
   [CHANGELOG](https://github.com/nechel12/aiosellers/blob/main/CHANGELOG.md).
 - GGsel is implemented against Seller API V1 only.
-- The library is a client, not a scheduler: the application runs the event loop
-  and decides how to deploy, scale and supervise bots.
-- Platform rules, rate limits and account bans are outside the library's
-  control. Use the APIs responsibly and at your own risk.
+- The library does not deploy, schedule, scale, or supervise bots.
+- Platform operators set their terms of use, rate limits, and account
+  enforcement policies.
 
 ## Security
 
@@ -409,11 +407,9 @@ Structure: `aiosellers/core` (platforms, events, hub, state stores),
 
 - [Zewsic/aiosellers](https://github.com/Zewsic/aiosellers) — the upstream
   project this repository is forked from.
-- [PlayerokAPI](https://github.com/alleexxeeyy/PlayerokAPI/) — PlayerOK API
-  reference.
-- [FunPayAPI](https://github.com/LIMBODS/FunPayAPI) — FunPay API reference.
-- [FunPayCardinal](https://github.com/sidor0912/FunPayCardinal) — FunPay bot
-  built on the same ideas.
+- [PlayerokAPI](https://github.com/alleexxeeyy/PlayerokAPI/) — library for PlayerOK.
+- [FunPayAPI](https://github.com/LIMBODS/FunPayAPI) — library for FunPay.
+- [FunPayCardinal](https://github.com/sidor0912/FunPayCardinal) — bot for FunPay.
 - [fpx](https://github.com/funpayx/fpx) — another FunPay client.
 
 ## Contributing
@@ -439,8 +435,8 @@ upstream project and is not associated with this distribution.
 
 ## Support the project
 
-All-In-One Sellers API is free and open source. If the project saves time,
-support is welcome:
+All-In-One Sellers API is an open-source project. Financial support is
+optional:
 
 <p align="center">
   <a href="https://boosty.to/nechel12/donate">
@@ -458,5 +454,5 @@ support is welcome:
 | **BNB Smart Chain** | `0x423aF840f67355371bf32480744A84069dfab5ff` |
 
 > [!WARNING]
-> Send only the matching asset on the specified network. Transfers to another
-> network cannot be recovered.
+> Send only the matching asset on the specified network. Transfers on the
+> wrong network may be unrecoverable.

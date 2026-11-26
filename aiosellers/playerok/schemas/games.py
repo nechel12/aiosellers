@@ -191,7 +191,7 @@ class GameCategory(ApiModel):
 
 
 class GameProfile(ApiModel):
-    """Профиль игры в сообщении. Это не карточка каталога: категорий и даты там нет."""
+    """Game metadata embedded in a message, without catalog categories or timestamps."""
 
     id: str = Field(..., alias="id")
     slug: str | None = Field(None, alias="slug")

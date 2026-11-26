@@ -1,22 +1,23 @@
 # Contributing
 
-Bug reports and pull requests are welcome. Please keep changes focused and
-explain the behavior and tradeoffs in the PR description.
+Keep changes focused and explain their purpose and tradeoffs in the pull
+request description.
 
 ## Reporting bugs and requesting features
 
 Use the [GitHub issue forms](https://github.com/nechel12/aiosellers/issues/new/choose).
 Include the platform, OS, Python version, installed version
 (`python -m pip show aiosellers-nechel12`), and a minimal reproduction with
-fake credentials. Redact logs and sample responses; report security issues
+placeholder credentials. Redact logs and sample responses; report security issues
 privately as described in [SECURITY.md](SECURITY.md).
 
 ## Development
 
 - Python 3.12+ and [uv](https://docs.astral.sh/uv/).
-- A platform account is only needed for manual checks; the test suite uses
-  fakes and does not call live APIs.
-- Before sending a change:
+- A platform account is required only for manual checks. Automated tests use
+  test doubles and do not call live APIs.
+
+Run these checks before submitting a change:
 
 ```sh
 uv sync --locked
@@ -26,14 +27,14 @@ uv run mypy aiosellers
 uv run pytest -q --cov=aiosellers --cov-fail-under=65
 ```
 
-- If you touch packaging, build and inspect the artifacts:
+For packaging changes, build and inspect the artifacts:
 
 ```sh
 uv build
 ```
 
-- If you touch an example, run it against a test account with throwaway
-  credentials:
+For changes to an example that calls a live API, verify it with an account
+and credentials reserved for testing:
 
 ```sh
 uv run python examples/ggsel_account.py
@@ -48,7 +49,7 @@ uv run python examples/ggsel_account.py
 - Add an entry under `[Unreleased]` in `CHANGELOG.md`.
 - Do not commit secrets, `.env` files, SQLite state files, `dist/`, or build
   artifacts.
-- Keep CI green. With locked dependencies, CI runs Ruff lint and format checks,
+- With locked dependencies, CI runs Ruff lint and format checks,
   mypy, and pytest (minimum 65% coverage) on Python 3.12, 3.13, and 3.14.
   It also builds and smoke-tests the wheel under Python 3.12.
 

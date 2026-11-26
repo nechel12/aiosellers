@@ -5,7 +5,7 @@ _ENUM_LOCK = threading.Lock()
 
 
 class OpenStrEnum(StrEnum):
-    """Площадка добавляет значения без предупреждения. Неизвестное становится членом, объект не падает."""
+    """Create enum members for non-empty string values not declared by the library."""
 
     @classmethod
     def _missing_(cls, value: object):

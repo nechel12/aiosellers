@@ -6,9 +6,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        Describe the problem first, then the proposed change. Keep in mind that
-        the library stays a thin async client: no scheduler, no proxy service,
-        no third-party backend.
+        Describe the problem and the proposed change. This project provides
+        asynchronous clients; it does not include a scheduler, a proxy service,
+        or a hosted backend.
 
   - type: dropdown
     id: platform
