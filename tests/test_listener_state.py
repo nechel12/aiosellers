@@ -91,8 +91,8 @@ class _FunPayRaw:
         return self.payloads.pop(0)
 
     async def history(self, chat_id, last_message_id, retry=True):
-        del chat_id, last_message_id, retry
-        return list(self.history_result)
+        del chat_id, retry
+        return [message for message in self.history_result if message.id < last_message_id]
 
     async def sales(self, cursor=None, query=None, retry=True):
         del query, retry

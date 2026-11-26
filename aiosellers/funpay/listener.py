@@ -421,7 +421,7 @@ class EventListener:
             self._store_chat_cursor(
                 shortcut.id,
                 (
-                    max(shortcut.node_message_id, max((snap.id for snap in history), default=0)),
+                    max((snap.id for snap in history), default=stored),
                     shortcut.user_message_id,
                     shortcut.last_message_text,
                 ),
@@ -452,15 +452,18 @@ class EventListener:
         for _ in range(batches):
             batch = await raw.chats.history(chat_id, last, retry=False)
             if not batch:
-                # A bookmark cursor ahead of the stored cursor means there is
-                # a gap; an empty page is not proof that the gap is closed.
-                complete = newest_id <= stored + 1
+                # An empty first page can be a bookmark/history race. An
+                # empty page after progress is the end of the available history,
+                # even if message IDs are sparse or the old bookmark is gone.
+                complete = bool(collected)
                 break
             for snap in batch:
                 if stored < snap.id < last:
                     collected[snap.id] = snap
-            oldest = min((snap.id for snap in batch), default=None)
-            if oldest is None or oldest <= stored + 1 or oldest >= last:
+            oldest = min((snap.id for snap in batch if 0 < snap.id < last), default=None)
+            if oldest is None:
+                break
+            if oldest <= stored + 1:
                 complete = True
                 break
             last = oldest

@@ -22,7 +22,11 @@ def _user_id(href: str | None) -> int:
 
 def _status(classes: list[str], text: str = "") -> OrderStatuses:
     lowered = (text or "").lower()
-    if "частичн" in lowered or "partially refunded" in lowered:
+    if (
+        "partially refunded" in lowered
+        or ("частичн" in lowered and "возвра" in lowered)
+        or ("частков" in lowered and "поверн" in lowered)
+    ):
         return OrderStatuses.PARTIALLY_REFUNDED
     if "warning" in classes:
         return OrderStatuses.REFUNDED
@@ -55,10 +59,12 @@ def parse_order_list(html: str, *, side: OrderSide) -> tuple[str | None, list[Or
         price, currency = parse_price(price_node.get_text(" ", strip=True) if price_node else "")
         user = row.select_one("div.media-user-name span")
         sub = row.select_one("div.text-muted")
+        status_node = row.select_one(".tc-status")
+        status_text = status_node.get_text(" ", strip=True) if status_node is not None else ""
         orders.append(
             OrderShortcut(
                 id=order_id,
-                status=_status(attr_list(row, "class"), row.get_text(" ", strip=True)),
+                status=_status(attr_list(row, "class"), status_text),
                 side=side,
                 description=desc_node.get_text(" ", strip=True) if desc_node is not None else "",
                 price=price,
