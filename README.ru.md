@@ -2,15 +2,14 @@
 
 [English](README.md) | **Русский**
 
+Асинхронные Python-клиенты для **FunPay**, **PlayerOK** и **GGsel** с общим
+потоком событий для нескольких аккаунтов и сохранением состояния между запусками.
+
 [![CI](https://github.com/nechel12/aiosellers/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nechel12/aiosellers/actions/workflows/ci.yml)
-[![License](https://img.shields.io/github/license/nechel12/aiosellers)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.12%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![CodeQL](https://github.com/nechel12/aiosellers/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/nechel12/aiosellers/actions/workflows/codeql.yml)
 [![PyPI](https://img.shields.io/pypi/v/aiosellers-nechel12)](https://pypi.org/project/aiosellers-nechel12/)
-[![Last commit](https://img.shields.io/github/last-commit/nechel12/aiosellers)](https://github.com/nechel12/aiosellers/commits/main)
-[![Fork of Zewsic/aiosellers](https://img.shields.io/badge/fork-Zewsic%2Faiosellers-blueviolet?logo=github)](https://github.com/Zewsic/aiosellers)
-[![Security policy](https://img.shields.io/badge/security-policy-green)](SECURITY.md)
-[![CodeQL](https://github.com/nechel12/aiosellers/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/nechel12/aiosellers/security/code-scanning)
-[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](CONTRIBUTING.md)
+[![Версии Python в CI](https://img.shields.io/pypi/pyversions/aiosellers-nechel12)](https://pypi.org/project/aiosellers-nechel12/)
+[![Лицензия](https://img.shields.io/github/license/nechel12/aiosellers)](LICENSE)
 
 ## Содержание
 
@@ -34,10 +33,6 @@
 - [Лицензия](#лицензия)
 - [Поддержать проект](#поддержать-проект)
 
-Асинхронная Python-обёртка для цифровых торговых площадок: **FunPay**,
-**PlayerOK** и **GGsel**. Один пакет, одна модель событий, один хаб для
-нескольких аккаунтов.
-
 > [!NOTE]
 > Это **форк** проекта
 > [Zewsic/aiosellers](https://github.com/Zewsic/aiosellers), который
@@ -59,33 +54,25 @@ PlayerOK — GraphQL и WebSocket-подписки, GGsel — официальн
 
 ## Установка
 
-Установка форка с GitHub:
+Требуется **Python 3.12+**. Установка опубликованного форка с PyPI:
+
+```bash
+pip install aiosellers-nechel12
+# или в проекте на uv:
+uv add aiosellers-nechel12
+```
+
+Импорт библиотеки — `aiosellers`. Команда `pip install aiosellers` установит
+**upstream**, а не этот форк. Используйте отдельные окружения: оба дистрибутива
+устанавливают один и тот же импортируемый пакет.
+
+Чтобы попробовать изменения до публикации на PyPI, установите версию с GitHub:
 
 ```bash
 pip install "git+https://github.com/nechel12/aiosellers.git"
 ```
 
-или через uv:
-
-```bash
-uv add "git+https://github.com/nechel12/aiosellers.git"
-```
-
-Имя дистрибутива — `aiosellers-nechel12`, импортируемый пакет по-прежнему
-`aiosellers`. Установка с PyPI:
-
-```bash
-pip install aiosellers-nechel12
-```
-
-`pip install aiosellers` устанавливает **upstream-пакет** с PyPI, а не этот
-форк. Для воспроизводимых установок версию фиксируют коммитом или тегом:
-
-```bash
-pip install "git+https://github.com/nechel12/aiosellers.git@<tag>"
-```
-
-**Требования:** Python 3.12+.
+Добавьте `@<тег-или-коммит>` к адресу, чтобы зафиксировать версию с GitHub.
 
 ## Документация
 
@@ -139,10 +126,11 @@ Playerok использует его для HTTP, загрузок, скачив
 GGsel — для ApiLogin и всех запросов Seller API. Учётные данные прокси не
 попадают в `repr` конфигурации.
 
-Playerok по умолчанию пропускает собственные сообщения продавца в ленте
-событий; передайте `include_own=True`, чтобы получать их. Identity map каждого
-клиента ограничен (`identity_map_limit`, по умолчанию 5000); `None` снимает
-ограничение. `listen()`/`start_polling()` принимают опции listener'а, например
+PlayerOK по умолчанию пропускает собственные сообщения продавца. Чтобы получать
+их, задайте `include_own=True` в `PlayerokClientConfig`, `listen()` или
+`start_polling()`. Для каждого типа сущностей у клиента свой кэш с лимитом
+в 5000 записей по умолчанию (`identity_map_limit`); `None` снимает ограничение.
+`listen()` и `start_polling()` принимают опции слушателя, например
 `order_page_limit`, `chat_history_batches` для FunPay и лимиты страниц/истории
 для GGsel.
 
@@ -264,9 +252,10 @@ asyncio.run(main())
 ## Персистентное состояние листенеров
 
 Передай `StateStore` в конфиг клиента, чтобы сохранять курсоры чатов,
-обработанные id сообщений и снимки заказов между перезапусками процесса. Без
-хранилища листенеры собирают состояние заново при каждом запуске и отдают
-только начальные снимки.
+обработанные ID сообщений и статусы заказов между перезапусками процесса. Без
+хранилища слушатели по-прежнему выдают новые события, но собирают начальное
+состояние заново при каждом запуске. Восстановление ограничено глубиной истории
+и опроса площадки; обработчики должны безопасно переносить повторы событий.
 
 ```python
 import asyncio
@@ -389,14 +378,12 @@ GGsel покрыт официальным Seller API V1 (`https://seller.ggsel.c
 
 ## Безопасность
 
-Отчёты об уязвимостях — в [SECURITY.md](SECURITY.md). Библиотека хранит токены
-в памяти, передаёт их только эндпоинтам площадок и держит состояние листенеров
-в передаваемом приложением `StateStore`. Учётные данные в логи попадают только
-по вине использующего кода, а файл SQLite стоит защитить, если в нём есть
-метаданные чатов.
-
-Сообщать об уязвимостях нужно через приватные GitHub-адвизори, а не в
-публичном issue.
+Сообщайте об уязвимостях через
+[приватную форму GitHub](https://github.com/nechel12/aiosellers/security/advisories/new),
+а не в публичном issue. Подробности — в [SECURITY.md](SECURITY.md).
+Используйте только доверенные адреса API и прокси. Перед публикацией очищайте
+логи от чувствительных данных и защищайте базу состояния: в ней могут быть
+ID чатов, а для FunPay — ещё и превью сообщений.
 
 ## Разработка
 
@@ -407,7 +394,6 @@ uv sync --locked
 uv run ruff check .
 uv run ruff format --check .
 uv run mypy aiosellers
-uv run pytest -q
 uv run pytest -q --cov=aiosellers --cov-fail-under=65
 
 uv run python examples/funpay_account.py
@@ -432,12 +418,12 @@ uv build
 
 ## Участие
 
-Багрепорты и pull request'ы приветствуются. Процесс разработки описан в
-[CONTRIBUTING.md](CONTRIBUTING.md). Участие предполагает согласие с
-[Кодексом поведения](CODE_OF_CONDUCT.md). Перед отправкой изменений запускаются
-`uv run ruff check .` и `uv run pytest -q`. Об уязвимостях сообщают через
-[SECURITY.md](SECURITY.md), а не в публичном issue. Заметки о релизах — в
-[CHANGELOG.md](CHANGELOG.md); мейнтейнерам — [RELEASING.md](RELEASING.md).
+Для публичных багрепортов и предложений используйте
+[формы GitHub Issues](https://github.com/nechel12/aiosellers/issues/new/choose).
+Локальные проверки и порядок подачи pull request описаны в
+[CONTRIBUTING.md](CONTRIBUTING.md), правила участия — в
+[Кодексе поведения](CODE_OF_CONDUCT.md). Мейнтейнерам пригодится
+[RELEASING.md](RELEASING.md).
 
 ## Лицензия
 

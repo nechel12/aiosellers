@@ -1,16 +1,17 @@
 # Migration from upstream aiosellers
 
 The fork keeps the import package `aiosellers` and the familiar adapter names.
-Only the **distribution** name is different, so it can coexist with the upstream
-PyPI project.
+The **distribution** name is different, but both distributions install the
+same import package. Uninstall upstream first or use a separate environment;
+do not install both in one environment.
 
 ## Install name
 
 | Source | Command |
 |---|---|
-| GitHub (works now) | `pip install "git+https://github.com/nechel12/aiosellers.git"` |
-| GitHub, pinned | `pip install "git+https://github.com/nechel12/aiosellers.git@v0.3.0"` |
 | PyPI | `pip install aiosellers-nechel12` |
+| GitHub | `pip install "git+https://github.com/nechel12/aiosellers.git"` |
+| GitHub, pinned | `pip install "git+https://github.com/nechel12/aiosellers.git@<tag-or-commit>"` |
 | Upstream (not this fork) | `pip install aiosellers` |
 
 The import package is always:
@@ -60,9 +61,12 @@ ggsel:{seller_id}:listener
 ```
 
 `MemoryStateStore` is for tests. `SQLiteStateStore` persists chat cursors,
-processed message ids and order snapshots; treat the database file as sensitive.
+processed message IDs and order statuses. FunPay state can also contain message
+previews; treat the database file as sensitive.
 
 ## Need help
 
-Open an issue with the platform, version/tag, Python version and a minimal
-reproduction. Do not include API keys, golden keys, access tokens or buyer data.
+Use the [bug report form](https://github.com/nechel12/aiosellers/issues/new/choose)
+with the platform, installed package version or Git tag, Python version, and a
+minimal reproduction. Do not include API keys, golden keys, access tokens, or
+buyer data. Report vulnerabilities through [SECURITY.md](../SECURITY.md).
