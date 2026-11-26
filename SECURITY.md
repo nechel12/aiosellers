@@ -2,24 +2,22 @@
 
 ## Supported versions
 
-Security fixes are provided for the latest `main` and the latest tagged release
-on a best-effort basis. Older commits, forks and unpublished snapshots are not
-supported.
+Security fixes are provided for `main` and the latest published
+[`aiosellers-nechel12` release on PyPI](https://pypi.org/project/aiosellers-nechel12/)
+on a best-effort basis. Older versions and downstream forks are not supported.
 
 ## Reporting a vulnerability
 
-Please use GitHub's private vulnerability reporting:
-
-1. Open the repository's **Security** tab.
-2. Choose **Report a vulnerability**
-   (`https://github.com/nechel12/aiosellers/security/advisories/new`).
-3. Include the affected version or commit, the platform adapter (FunPay,
-   Playerok, GGsel, core/hub), a minimal reproduction, and the impact.
+Sign in to GitHub and use
+[Report a vulnerability](https://github.com/nechel12/aiosellers/security/advisories/new).
+Include the affected version or commit, the adapter or component, a minimal
+reproduction with fake credentials, and the impact.
 
 Do not open a public issue and do not include real API keys, golden keys, access
 tokens, session cookies, buyer personal data or chat contents. If private
-reporting is unavailable, open a minimal public issue asking the maintainer for
-a private channel without disclosing details.
+reporting is unavailable, contact the maintainer privately if you already have
+a private channel. Do not post the vulnerability or any identifying details in
+a public issue.
 
 ## What to expect
 
@@ -55,13 +53,19 @@ Out of scope:
 
 ## Security model
 
-The library has no server component and no telemetry. Credentials live in
-memory for the lifetime of a client and are sent only to the platform endpoints
-the adapter talks to. A configured `StateStore` may persist chat ids, message
-ids, order snapshots and cursors; treat the SQLite file as sensitive and
-restrict its permissions. The library cannot protect credentials from the
-process that embeds it — do not log them, do not commit them, and prefer
-environment variables or a secret manager.
+The library has no server component and no telemetry. Clients use credentials
+in memory and send them to their configured endpoints. Treat custom `base_url`,
+`ws_url`, and proxy settings as trusted configuration, not as user input.
+Use a secret manager or environment variables, and redact logs and tracebacks:
+errors may include excerpts of platform responses.
+
+A configured `StateStore` may persist chat and message IDs, order statuses,
+cursors, and, for FunPay, chat message previews. Restrict access to the SQLite
+database, its sidecar files, and backups.
+
+Local upload paths are unrestricted unless `AIOSELLERS_MEDIA_ROOTS` is set.
+Limit it to trusted directories, or use an empty value to disable local paths.
+Do not pass arbitrary media paths from untrusted callers.
 
 `PlayerokTransport.download()` restricts downloads to the Playerok host
 allowlist and uses a separate client without the session cookie. In contrast,

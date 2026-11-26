@@ -23,9 +23,16 @@ regardless of experience level, background, or identity.
 ## Enforcement
 
 Maintainers may edit or remove contributions, close issues or pull requests,
-and block participation when this code is violated. Report concerns to the
-maintainer via GitHub ([@nechel12](https://github.com/nechel12)); for sensitive
-reports, ask for a private channel first.
+and block participation when this code is violated.
 
 This code applies in project spaces and when representing the project
 elsewhere.
+
+## Reporting a concern
+
+Do not post sensitive incident details or personal data in public issues or
+pull requests. Contact [@nechel12](https://github.com/nechel12) through a
+private channel if you already have one, or ask how to reach the maintainer
+privately without posting details. For abuse on GitHub, you can also use
+[GitHub's reporting tools](https://docs.github.com/en/site-policy/acceptable-use-policies/github-acceptable-use-policies#reporting-abuse).
+Maintainers should limit access to a report to people who need it to respond.
