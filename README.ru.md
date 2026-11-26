@@ -139,6 +139,13 @@ Playerok использует его для HTTP, загрузок, скачив
 GGsel — для ApiLogin и всех запросов Seller API. Учётные данные прокси не
 попадают в `repr` конфигурации.
 
+Playerok по умолчанию пропускает собственные сообщения продавца в ленте
+событий; передайте `include_own=True`, чтобы получать их. Identity map каждого
+клиента ограничен (`identity_map_limit`, по умолчанию 5000); `None` снимает
+ограничение. `listen()`/`start_polling()` принимают опции listener'а, например
+`order_page_limit`, `chat_history_batches` для FunPay и лимиты страниц/истории
+для GGsel.
+
 ## Быстрый старт: PlayerOK
 
 ```python

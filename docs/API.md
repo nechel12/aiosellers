@@ -73,7 +73,9 @@ from aiosellers.funpay import FunPay, FunPayClientConfig
 - `client.listen(...)` and `client.start_polling(...)`.
 
 Important config fields: `golden_key`, `poll_interval`, `request_timeout`,
-`max_concurrent_requests`, `state`, `bot_mark`, `handler_timeout`.
+`max_concurrent_requests`, `state`, `bot_mark`, `handler_timeout`,
+`identity_map_limit`. Listener pacing options such as `order_page_limit` and
+`chat_history_batches` can be passed to `listen()`/`start_polling()`.
 
 ## Playerok
 
@@ -91,7 +93,9 @@ from aiosellers.playerok import Playerok, PlayerokClientConfig
 - `client.listen(...)` and `client.start_polling(...)`.
 
 Playerok uses GraphQL over HTTP and a WebSocket subscription feed. The feed
-reconnects with backoff and reconciles missed chats after a reconnect.
+reconnects with backoff and replays unprocessed messages from recent chats after
+a reconnect. The seller's own messages are skipped by default
+(`include_own=True` opts in).
 
 ## GGsel
 
@@ -107,7 +111,8 @@ from aiosellers.ggsel import GGsel, GGselClientConfig
 - `client.products` — products and price updates.
 - `client.sales` — sales and purchase details.
 - `client.reviews` — seller reviews.
-- `client.listen(...)` and `client.start_polling(...)`.
+- `client.listen(...)` and `client.start_polling(...)`, both accept listener
+  limits (`chats_page_size`, `history_limit`, `sales_top`, ...).
 
 GGsel uses Seller API V1 with a signed login, token refresh and polling. There
 are no webhooks; a configured `StateStore` keeps chat/sale/review cursors across

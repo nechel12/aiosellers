@@ -2,6 +2,48 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- PlayerOK review polling now queues active deals that existed at listener
+  startup and no longer drops them after a short 15-minute window; review ids
+  are remembered so existing reviews are not emitted again.
+- PlayerOK reconnect resync now replays every unprocessed message in the recent
+  page, not just `lastMessage`/`{{ITEM_PAID}}`; newly discovered chats are
+  subscribed immediately.
+- PlayerOK own messages are skipped by default (`include_own` opt-in), image
+  messages produce `NewMessageEvent`, and `NewReviewEvent` carries the review.
+- PlayerOK filtered chat/deal pagination no longer stops after the first page
+  when every row is filtered out.
+- PlayerOK `Item.game_id`, `Chat.get_deals().item_id`, missing-user raw lookups,
+  false GraphQL boolean filters, `remove_item` results and `GameAPI.limit` are
+  fixed.
+- PlayerOK `close()` now stops an active listener; `aclose()` wakes a blocked
+  event consumer; state loading during `listen()` is retried.
+- PlayerOK WebSocket URL/origin follow `base_url`/`ws_url`; Cloudflare detection
+  no longer matches ordinary chat text.
+- FunPay review `stars` filters force a fresh order lookup instead of using a
+  cached shortcut order.
+- FunPay chat/order gap pagination now grows its page window until the gap is
+  collected, and listener options are exposed through `listen()`.
+- FunPay identity-map merges are partial for shortcut rows and full for detail
+  rows, so list refreshes no longer erase order/product details.
+- FunPay message history pagination, `OrderAPI.iter(limit=...)`, Ukrainian
+  system-message classification, locale-independent stale-cookie detection,
+  custom-host cookie storage, badge parsing and malformed `sent` state are fixed.
+- FunPay startup is single-flight; `send_message(text + image)` and
+  `leave_as_unread=True` now raise clear errors instead of silently ignoring
+  input.
+- GGsel partial product updates no longer erase fields, new chats only replay
+  recent history, one malformed row no longer stops polling, chat lookup covers
+  a wider window, and history/category pagination is bounded correctly.
+- `SellerHub` auto-generated session ids skip explicitly registered ids.
+- Identity maps are bounded and shared; long-running clients can cap them with
+  `identity_map_limit`.
+- Event listeners commit durable state after events are yielded by the public
+  `listen()` path, reducing event loss on crashes.
+
 ## [0.3.7] - 2026-11-18
 
 ### Changed

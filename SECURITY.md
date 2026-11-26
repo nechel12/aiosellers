@@ -66,7 +66,11 @@ environment variables or a secret manager.
 `PlayerokTransport.download()` restricts downloads to the Playerok host
 allowlist and uses a separate client without the session cookie. In contrast,
 `prepare_image_file()` accepts arbitrary user-supplied image URLs by design;
-callers must validate untrusted URLs before passing them.
+it resolves every redirect and rejects private, loopback, link-local and other
+non-public addresses, but callers should still validate untrusted URLs before
+passing them. The TLS library performs its own DNS resolution, so a hostname
+that changes between the check and the request remains outside the library's
+control; use an allowlist at the application boundary when URLs are untrusted.
 
 ## Safe harbor
 

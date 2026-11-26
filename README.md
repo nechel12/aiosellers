@@ -140,6 +140,13 @@ Playerok uses it for HTTP, uploads, downloads and WebSocket subscriptions; GGsel
 uses it for ApiLogin and every Seller API request. Proxy credentials are omitted
 from config `repr`.
 
+Playerok skips the seller's own messages in the event feed by default; pass
+`include_own=True` to see them. Identity maps are bounded per client
+(`identity_map_limit`, default 5000); pass `None` to keep them unlimited.
+`listen()`/`start_polling()` accept listener-specific options such as
+`order_page_limit`, `chat_history_batches` (FunPay) and page/history limits
+(GGsel).
+
 ## Quick Start: PlayerOK
 
 ```python
