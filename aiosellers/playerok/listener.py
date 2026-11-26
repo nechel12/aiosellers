@@ -213,6 +213,7 @@ class EventListener:
         self.known_deal_ids: set[str] = set()
         self._known_deal_order: deque[str] = deque()
         self._deals_baseline_ready = False
+        self._review_baseline_needs_migration = False
         self.review_deal_ids: list[str] = []
         self.review_checks: dict[str, dict[str, float | int]] = {}
         self._review_first_seen: dict[str, float] = {}
@@ -803,12 +804,14 @@ class EventListener:
         last_refresh = 0.0
         while not self._stop.is_set():
             now = asyncio.get_running_loop().time()
+            baseline_ready = (
+                self._deals_baseline_ready and not self._review_baseline_needs_migration
+            )
             baseline_due = (
-                not self._deals_baseline_ready
-                and now - last_refresh >= self.review_baseline_retry_delay
+                not baseline_ready and now - last_refresh >= self.review_baseline_retry_delay
             )
             refresh_due = (
-                self._deals_baseline_ready
+                baseline_ready
                 and self.review_refresh_interval
                 and now - last_refresh >= self.review_refresh_interval
             )
@@ -853,11 +856,19 @@ class EventListener:
             "CONFIRMED",
             "CONFIRMED_AUTOMATICALLY",
         }
-        if not self._deals_baseline_ready:
+        if not self._deals_baseline_ready or self._review_baseline_needs_migration:
             # Existing deals are not "new", but they can still receive a review
             # later. Queue active deals and remember reviews already present.
             for schema in response.deals:
-                self._remember_known_deal(schema.id)
+                deal_id = schema.id
+                known = deal_id in self.known_deal_ids or deal_id in self.processed_deal_ids
+                self._remember_known_deal(deal_id)
+                if deal_id in self.review_deal_ids or deal_id in self._pending_deal_ids:
+                    continue
+                if self._review_baseline_needs_migration and not known:
+                    # Deals added since the old checkpoint are still new.
+                    self._queue_review_deal(deal_id)
+                    continue
                 review = getattr(schema, "review", None)
                 if review is not None and getattr(review, "id", None):
                     self._remember_review_id(review.id)
@@ -865,14 +876,19 @@ class EventListener:
                 status = getattr(schema, "status", None)
                 status_name = getattr(status, "value", status)
                 if status_name in active_statuses:
-                    self._queue_review_deal(schema.id)
+                    self._queue_review_deal(deal_id)
             self._deals_baseline_ready = True
+            self._review_baseline_needs_migration = False
             self._mark_state_dirty()
             return
 
         for schema in response.deals:
             deal_id = schema.id
-            if deal_id in self.known_deal_ids or deal_id in self.processed_deal_ids:
+            if (
+                deal_id in self.known_deal_ids
+                or deal_id in self.processed_deal_ids
+                or deal_id in self._pending_deal_ids
+            ):
                 continue
             self._remember_known_deal(deal_id)
             self._queue_review_deal(deal_id)
@@ -1028,8 +1044,13 @@ class EventListener:
         if deal_id in self.review_deal_ids:
             return
         self.review_deal_ids.append(deal_id)
-        while len(self.review_deal_ids) > self.state_limit:
-            self.review_deal_ids.pop(0)
+        if len(self.review_deal_ids) > self.state_limit:
+            oldest = next(
+                queued
+                for queued in self.review_deal_ids
+                if queued not in self._pending_review_deals
+            )
+            self._remove_review_deal(oldest)
 
     def _remember_chat_id(self, chat_id: str) -> None:
         if chat_id in self.known_chat_ids:
@@ -1136,6 +1157,8 @@ class EventListener:
         while len(self._review_seen_order) > self.state_limit:
             self._review_seen_ids.discard(self._review_seen_order.popleft())
         self._deals_baseline_ready = deals_ready
+        baseline_seeded = bool(data.get("review_baseline_seeded", "seen_reviews" in data))
+        self._review_baseline_needs_migration = deals_ready and not baseline_seeded
         if self._message_feed_ready or messages or known_deals:
             # Recover messages missed while the process was down, the same way
             # a websocket reconnect does.
@@ -1155,6 +1178,7 @@ class EventListener:
         self._review_seen_ids.clear()
         self._review_seen_order.clear()
         self._deals_baseline_ready = False
+        self._review_baseline_needs_migration = False
         self._state_dirty = False
 
     @staticmethod
@@ -1175,6 +1199,9 @@ class EventListener:
             "review_deals": list(self.review_deal_ids),
             "seen_reviews": list(self._review_seen_order),
             "deals_ready": self._deals_baseline_ready,
+            "review_baseline_seeded": (
+                self._deals_baseline_ready and not self._review_baseline_needs_migration
+            ),
         }
 
     async def _save_state(self) -> None:

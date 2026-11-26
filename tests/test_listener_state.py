@@ -299,7 +299,7 @@ def _playerok_deal(deal_id: str = "deal-1", *, reviewed: bool = False) -> ItemDe
     }
     if reviewed:
         payload["testimonial"] = {
-            "id": "review-1",
+            "id": f"review-{deal_id}",
             "status": "APPROVED",
             "rating": 5,
             "text": "ok",
@@ -372,6 +372,42 @@ class _FlakyPlayerokStateStore:
 
 
 class PlayerokStateTests(unittest.IsolatedAsyncioTestCase):
+    async def test_old_checkpoint_seeds_active_deals_without_forgetting_pending_reviews(self):
+        store = MemoryStateStore()
+        key = "playerok:me:listener"
+        await store.set(
+            key,
+            {
+                "version": 1,
+                "deals_ready": True,
+                "known_deals": ["active", "reviewed", "pending"],
+                "review_deals": ["pending"],
+            },
+        )
+        raw = _PlayerokRaw()
+        listener = _playerok_listener(_playerok_client(raw), store)
+        await listener._ensure_state_loaded()
+        listener._mark_message("message")
+        await listener._save_state()
+
+        raw.get_deals = mock.AsyncMock(
+            return_value=SimpleNamespace(
+                deals=[
+                    _playerok_deal("active"),
+                    _playerok_deal("reviewed", reviewed=True),
+                    _playerok_deal("pending", reviewed=True),
+                    _playerok_deal("new", reviewed=True),
+                ]
+            )
+        )
+        restarted = _playerok_listener(_playerok_client(raw), store)
+        await restarted._refresh_known_deals()
+
+        snapshot = await store.get(key)
+        self.assertEqual(snapshot["review_deals"], ["pending", "active", "new"])
+        self.assertEqual(snapshot["seen_reviews"], ["review-reviewed"])
+        self.assertTrue(snapshot["review_baseline_seeded"])
+
     async def test_public_feed_closing_with_queued_message_keeps_it_retryable(self):
         store = MemoryStateStore()
         client = _playerok_client(_PlayerokRaw())
