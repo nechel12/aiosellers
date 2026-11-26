@@ -28,9 +28,10 @@ On Windows, use a temporary directory and the `Scripts\python.exe` /
 
 3. **Publish on GitHub**
    - Commit and push `main`; wait for CI.
-   - Create a signed annotated tag (see [Signed tags](#signed-tags)):
-     `git tag -s vX.Y.Z -m "vX.Y.Z"`, then `git push origin vX.Y.Z`.
-   - Create a GitHub release with the changelog notes.
+   - Create and verify a signed annotated tag (see [Signed tags](#signed-tags)),
+     then push it: `git push origin vX.Y.Z`.
+   - Create a GitHub Release for the existing tag with the changelog notes.
+     A tag or a successful PyPI publish does not create a GitHub Release.
 
 4. **PyPI**
    - The distribution is `aiosellers-nechel12`; the import package remains
@@ -42,7 +43,7 @@ On Windows, use a temporary directory and the `Scripts\python.exe` /
      configured. The tag workflow then builds and publishes the wheel; a normal
      tag without the variable only builds and runs the checks.
    - Alternatively, run `uv publish` locally with a PyPI token.
-   - Update `README.md`, `README.ru.md` and badges with the new install command.
+   - Verify the published version on PyPI and the README badges.
 
 5. **Rollback**
    - Reinstall the previous tag (for example, the tag before the current one)
@@ -50,10 +51,12 @@ On Windows, use a temporary directory and the `Scripts\python.exe` /
 
 ## Signed tags
 
-Release tags from `v0.3.3` are signed with the SSH key published in
+Release tags `v0.3.3` and `v0.3.4` were signed with the SSH key published in
 `docs/release-signing-key.pub` (fingerprint
 `SHA256:9nn6n/ESaUSqHp5rXqGsQ8JC/xzmLpacaAppN2etg/E`). The private key is kept
-outside the repository and is never used for repository access.
+outside the repository and is never used for repository access. The published
+tags `v0.3.5`–`v0.3.7` are unsigned. Sign and verify new release tags rather
+than replacing existing published tags.
 
 Create a signed tag without changing the repository configuration:
 
@@ -65,9 +68,10 @@ git -c gpg.format=ssh -c user.signingkey="$HOME/.ssh/aiosellers-release" \
 Verify it locally:
 
 ```sh
-printf '%s %s\n' "da_ladno123@list.ru" "$(cat docs/release-signing-key.pub)" \
-  > /tmp/allowed_signers
-git -c gpg.ssh.allowedSignersFile=/tmp/allowed_signers tag -v vX.Y.Z
+allowed_signers=$(mktemp)
+printf '%s %s\n' 'aiosellers-release' "$(cat docs/release-signing-key.pub)" \
+  > "$allowed_signers"
+git -c "gpg.ssh.allowedSignersFile=$allowed_signers" verify-tag vX.Y.Z
 ```
 
 GitHub marks the tag as Verified after the public key is added under
