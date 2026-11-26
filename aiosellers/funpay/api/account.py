@@ -28,7 +28,7 @@ class AccountAPI:
             active_sales=transport.active_sales,
             active_purchases=transport.active_purchases,
         )
-        return self._client.remember("users", user.id, user)
+        return self._client.remember("users", user.id, user, partial=True)
 
     async def profile(self) -> User:
         if self._client._transport is None:

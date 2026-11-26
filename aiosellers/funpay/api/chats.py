@@ -49,10 +49,27 @@ class ChatMessagesAPI:
         last_message_id: int | None = None,
         limit: int = 100,
     ) -> builtins.list[Message]:
+        """Load message history, paging towards older messages when needed.
+
+        ``limit=0`` means "all available pages" and should be used carefully.
+        """
+        raw = self._client.chats._require()
         last = 9999999999999999999 if last_message_id is None else last_message_id
-        snaps = await self._client.chats._require().chats.history(chat_id, last)
-        messages = [self._client.chats._message(snap) for snap in snaps if snap.id > 0]
-        messages.sort(key=lambda item: item.id)
+        found: dict[int, MessageSnapshot] = {}
+        while True:
+            snaps = await raw.chats.history(chat_id, last)
+            if not snaps:
+                break
+            for snap in snaps:
+                if snap.id > 0 and snap.id < last:
+                    found[snap.id] = snap
+            oldest = min((snap.id for snap in snaps if snap.id > 0), default=None)
+            if oldest is None or oldest >= last:
+                break
+            last = oldest
+            if limit and len(found) >= limit:
+                break
+        messages = [self._client.chats._message(found[key]) for key in sorted(found)]
         if limit:
             return messages[-limit:]
         return messages
@@ -172,6 +189,8 @@ class ChatAPI:
     ) -> Message:
         if text is None and image is None:
             raise ValueError("text or image is required")
+        if text is not None and image is not None:
+            raise ValueError("FunPay does not support text and image in one message")
         image_id = None
         if isinstance(image, int):
             image_id = image

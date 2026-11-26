@@ -55,6 +55,8 @@ class _IdentityMaps:
 class FunPay:
     """High-level FunPay client."""
 
+    platform = "funpay"
+
     def __init__(self, config: FunPayClientConfig | str | None = None) -> None:
         if isinstance(config, str):
             config = FunPayClientConfig(golden_key=config)
@@ -67,13 +69,15 @@ class FunPay:
         self._use_identity_map = config.use_identity_map
         self._account_id: int | None = None
         self._polling_task: asyncio.Task | None = None
+        self._lifecycle_lock = asyncio.Lock()
         if self._use_identity_map:
+            limit = config.identity_map_limit
             self._identity_maps = _IdentityMaps(
-                users=IdentityMap(),
-                chats=IdentityMap(),
-                orders=IdentityMap(),
-                lots=IdentityMap(),
-                categories=IdentityMap(),
+                users=IdentityMap(limit),
+                chats=IdentityMap(limit),
+                orders=IdentityMap(limit),
+                lots=IdentityMap(limit),
+                categories=IdentityMap(limit),
             )
         self.account = AccountAPI(self)
         self.chats = ChatAPI(self)
@@ -88,7 +92,13 @@ class FunPay:
     def account_id(self) -> int | None:
         return self._account_id
 
-    def remember(self, bucket: str, key, entity):
+    def remember(self, bucket: str, key, entity, *, partial: bool = False):
+        """Remember an entity and return the identity-mapped instance.
+
+        ``partial=True`` is used for shortcut objects (chat/order list rows):
+        only non-None fields are copied, so a later list refresh cannot wipe
+        details that were loaded by a full ``get()`` call.
+        """
         entity._client = self
         if not self._use_identity_map:
             return entity
@@ -99,7 +109,12 @@ class FunPay:
         for item in fields(entity):
             if item.name.startswith("_"):
                 continue
-            setattr(current, item.name, getattr(entity, item.name))
+            value = getattr(entity, item.name)
+            if partial and value is None:
+                continue
+            if partial and item.default is False and value is False:
+                continue
+            setattr(current, item.name, value)
         return current
 
     def cached(self, bucket: str, key):
@@ -115,31 +130,34 @@ class FunPay:
         await self.close()
 
     async def start(self) -> None:
-        if self._transport is not None:
-            return
-        self._transport = FunPayTransport(self._config)
-        self._raw = RawAPI(self._transport)
-        try:
-            await self._transport.refresh_profile()
-        except BaseException:
-            await self.close()
-            raise
-        self._account_id = self._transport.account_id
+        async with self._lifecycle_lock:
+            if self._transport is not None:
+                return
+            transport = FunPayTransport(self._config)
+            try:
+                await transport.refresh_profile()
+            except BaseException:
+                await transport.close()
+                raise
+            self._transport = transport
+            self._raw = RawAPI(transport)
+            self._account_id = transport.account_id
 
     async def close(self) -> None:
-        transport = self._transport
-        self._transport = None
-        self._raw = None
-        self._account_id = None
-        self._listener = None
-        if self._use_identity_map:
-            self._identity_maps.users.clear()
-            self._identity_maps.chats.clear()
-            self._identity_maps.orders.clear()
-            self._identity_maps.lots.clear()
-            self._identity_maps.categories.clear()
-        if transport is not None:
-            await transport.close()
+        async with self._lifecycle_lock:
+            transport = self._transport
+            self._transport = None
+            self._raw = None
+            self._account_id = None
+            self._listener = None
+            if self._use_identity_map:
+                self._identity_maps.users.clear()
+                self._identity_maps.chats.clear()
+                self._identity_maps.orders.clear()
+                self._identity_maps.lots.clear()
+                self._identity_maps.categories.clear()
+            if transport is not None:
+                await transport.close()
 
     def listen(
         self,
@@ -149,10 +167,12 @@ class FunPay:
         purchases: bool = True,
         reviews: bool = True,
         interval: float | None = None,
+        **listener_options: Any,
     ):
         if self._transport is None:
             raise RuntimeError("Client is not started. Call start() or start_polling() first.")
-        return EventListener(self, state=self._config.state).listen(
+        listener_options.setdefault("state", self._config.state)
+        return EventListener(self, **listener_options).listen(
             messages=messages,
             orders=orders,
             purchases=purchases,
@@ -167,13 +187,18 @@ class FunPay:
         orders: bool = True,
         purchases: bool = True,
         reviews: bool = True,
+        **listener_options: Any,
     ) -> None:
         """Start the session and dispatch decorator handlers until :meth:`stop`."""
         await self.start()
         self._polling_task = asyncio.current_task()
         try:
             async for event in self.listen(
-                messages=messages, orders=orders, purchases=purchases, reviews=reviews
+                messages=messages,
+                orders=orders,
+                purchases=purchases,
+                reviews=reviews,
+                **listener_options,
             ):
                 await self._dispatch(event)
         finally:
@@ -195,7 +220,7 @@ class FunPay:
     ):
         """Yield saved chat messages as events, oldest id first.
 
-        Loads one history page per chat, the same page as ``chats.messages.list``.
+        Loads up to 100 recent messages per chat and pages back when needed.
         ``limit`` keeps the newest messages of that merged timeline.
         A review notice yields ``NewMessageEvent`` and then the review event,
         same as live polling.
@@ -209,7 +234,7 @@ class FunPay:
         collected: list[tuple[Chat, Any]] = []
         for chat in chats:
             try:
-                messages = await self.chats.messages.list(chat.id, limit=0)
+                messages = await self.chats.messages.list(chat.id, limit=100)
             except Exception:
                 logger.exception("FunPay backtest history failed for chat %s", chat.id)
                 continue
@@ -374,7 +399,7 @@ class FunPay:
                 order_id = getattr(event, "order_id", None)
                 if order_id is None:
                     raise ValueError("review event has no order id")
-                order = await self.orders.get(str(order_id))
+                order = await self.orders.get(str(order_id), force_refresh=True)
                 stars = order.review.stars if order.review is not None else None
             except Exception:
                 logger.exception("Review star lookup failed")

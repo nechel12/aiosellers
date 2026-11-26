@@ -7,7 +7,7 @@ import random
 import re
 import time
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 from bs4 import BeautifulSoup
 
@@ -51,6 +51,7 @@ class FunPayTransport:
         from tls_requests import AsyncClient  # type: ignore
 
         self._config = FunPayConfig.from_client(config)
+        self._cookie_domain = urlparse(self._config.base_url).hostname or "funpay.com"
         self.account_id: int | None = None
         self.username: str | None = None
         self.csrf_token: str | None = None
@@ -315,7 +316,7 @@ class FunPayTransport:
             except Exception:
                 pass
         try:
-            jar.set(name, value, domain="funpay.com", path="/")
+            jar.set(name, value, domain=self._cookie_domain, path="/")
         except Exception:
             try:
                 jar.set(name, value)
@@ -370,7 +371,11 @@ def _is_login(response: Any) -> bool:
 def _stale_cookie(response: Any) -> bool:
     if getattr(response, "status_code", None) != 400:
         return False
-    return "Необходимая cookie отсутствует или устарела" in response_text(response)
+    text = response_text(response).lower()
+    return (
+        "cookie" in text
+        and ("устарел" in text or "отсутств" in text or "outdated" in text or "missing" in text)
+    ) or "необходимая cookie отсутствует или устарела" in text
 
 
 def _cookie_get(cookies: Any, name: str) -> str | None:

@@ -80,14 +80,23 @@ class EventListener:
         *,
         order_resync_interval: float = 60.0,
         order_page_limit: int = 50,
+        order_page_limit_max: int = 500,
         chat_history_batches: int = 5,
+        chat_history_max_batches: int = 100,
+        chat_state_limit: int = 5000,
         state: StateStore | None = None,
         sent_history_limit: int = 1000,
     ) -> None:
         self.client = client
         self.order_resync_interval = order_resync_interval
-        self.order_page_limit = order_page_limit
-        self.chat_history_batches = chat_history_batches
+        self.order_page_limit = max(1, order_page_limit)
+        self.order_page_limit_max = max(self.order_page_limit, order_page_limit_max)
+        self.chat_history_batches = max(1, chat_history_batches)
+        self.chat_history_max_batches = max(self.chat_history_batches, chat_history_max_batches)
+        self.chat_state_limit = max(1, chat_state_limit)
+        self._order_attempts = 0
+        self._purchase_attempts = 0
+        self._chat_history_attempts: dict[int, int] = {}
         self.state = state
         self.sent_history_limit = max(1, sent_history_limit)
         self.sent_ids: dict[int | str, set[int]] = {}
@@ -112,8 +121,10 @@ class EventListener:
         self._track_sent(chat_id, message_id)
         if isinstance(chat_id, int):
             self._track_sent(str(chat_id), message_id)
-        elif chat_id.isdigit():
+        elif isinstance(chat_id, str) and chat_id.isdigit():
             self._track_sent(int(chat_id), message_id)
+        while len(self.sent_ids) > self.chat_state_limit:
+            self.sent_ids.pop(next(iter(self.sent_ids)))
         self._mark_state_dirty()
 
     def _track_sent(self, chat_id: int | str, message_id: int) -> None:
@@ -140,7 +151,7 @@ class EventListener:
         reviews: bool = True,
         interval: float | None = None,
     ):
-        pause = self.client._config.poll_interval if interval is None else interval
+        pause = max(0.1, self.client._config.poll_interval if interval is None else interval)
         while True:
             started = time.monotonic()
             transport = self.client._transport
@@ -148,10 +159,15 @@ class EventListener:
                 await _sleep(pause)
                 continue
             events = await self.tick(
-                messages=messages, orders=orders, purchases=purchases, reviews=reviews
+                messages=messages,
+                orders=orders,
+                purchases=purchases,
+                reviews=reviews,
+                persist=False,
             )
             for event in events:
                 yield event
+            await self._save_state()
             remain = pause - (time.monotonic() - started)
             if remain > 0:
                 await _sleep(remain)
@@ -163,6 +179,7 @@ class EventListener:
         orders: bool = True,
         purchases: bool = True,
         reviews: bool = True,
+        persist: bool = True,
     ):
         transport = self.client._transport
         if transport is None:
@@ -187,7 +204,8 @@ class EventListener:
             logger.warning("FunPay poll failed: %s", exc)
             return []
         finally:
-            await self._save_state()
+            if persist:
+                await self._save_state()
 
     async def _collect(self, *, messages: bool, orders: bool, purchases: bool, reviews: bool):
         account_id = self.client.account_id
@@ -284,34 +302,49 @@ class EventListener:
                 events.extend(self._purchase_diff(rows, buyer, seller, complete=complete))
         return events
 
+    def _order_pages(self, attempts: int) -> int:
+        return min(self.order_page_limit_max, self.order_page_limit * (2**attempts))
+
     async def _sales_rows(self, raw):
         rows = []
         seen: set[str] = set()
         cursor = None
-        for _ in range(self.order_page_limit):
+        pages = self._order_pages(self._order_attempts)
+        for _ in range(pages):
             cursor, batch = await raw.orders.sales(cursor, {}, retry=False)
             for row in batch:
                 if row.id not in seen:
                     seen.add(row.id)
                     rows.append(row)
             if not cursor:
+                self._order_attempts = 0
                 return rows, True
-        logger.warning("FunPay sales pagination limit (%s) reached", self.order_page_limit)
+        self._order_attempts = min(self._order_attempts + 1, 16)
+        logger.warning(
+            "FunPay sales pagination limit (%s pages) reached; retrying with a larger window",
+            pages,
+        )
         return rows, False
 
     async def _purchase_rows(self, raw):
         rows = []
         seen: set[str] = set()
         cursor = None
-        for _ in range(self.order_page_limit):
+        pages = self._order_pages(self._purchase_attempts)
+        for _ in range(pages):
             cursor, batch = await raw.orders.purchases(cursor, retry=False)
             for row in batch:
                 if row.id not in seen:
                     seen.add(row.id)
                     rows.append(row)
             if not cursor:
+                self._purchase_attempts = 0
                 return rows, True
-        logger.warning("FunPay purchases pagination limit (%s) reached", self.order_page_limit)
+        self._purchase_attempts = min(self._purchase_attempts + 1, 16)
+        logger.warning(
+            "FunPay purchases pagination limit (%s pages) reached; retrying with a larger window",
+            pages,
+        )
         return rows, False
 
     async def _chat_events(self, obj: dict, *, reviews: bool):
@@ -329,10 +362,13 @@ class EventListener:
                         client=self.client, chat=self.client.chats._from_shortcut(shortcut)
                     )
                 )
-                self._chats[shortcut.id] = (
-                    shortcut.node_message_id,
-                    shortcut.user_message_id,
-                    shortcut.last_message_text,
+                self._store_chat_cursor(
+                    shortcut.id,
+                    (
+                        shortcut.node_message_id,
+                        shortcut.user_message_id,
+                        shortcut.last_message_text,
+                    ),
                 )
             self._chat_ready = True
             self._mark_state_dirty()
@@ -365,42 +401,60 @@ class EventListener:
             except Exception:
                 logger.exception("FunPay history failed for chat %s", shortcut.id)
                 # Keep the old cursor so the next tick retries the same gap.
-                self._chats[shortcut.id] = (
-                    stored,
-                    shortcut.user_message_id,
-                    shortcut.last_message_text,
+                self._store_chat_cursor(
+                    shortcut.id,
+                    (stored, shortcut.user_message_id, shortcut.last_message_text),
                 )
                 self._mark_state_dirty()
                 continue
             if not complete:
                 # Do not emit a partial gap or advance past messages still to be fetched.
-                self._chats[shortcut.id] = (
-                    stored,
-                    shortcut.user_message_id,
-                    shortcut.last_message_text,
+                self._store_chat_cursor(
+                    shortcut.id,
+                    (stored, shortcut.user_message_id, shortcut.last_message_text),
                 )
                 self._mark_state_dirty()
                 continue
             for snap in history:
                 message = self.client.chats._message(snap)
                 events.extend(message_events(self.client, chat, message, reviews=reviews))
-            self._chats[shortcut.id] = (
-                max(shortcut.node_message_id, max((snap.id for snap in history), default=0)),
-                shortcut.user_message_id,
-                shortcut.last_message_text,
+            self._store_chat_cursor(
+                shortcut.id,
+                (
+                    max(shortcut.node_message_id, max((snap.id for snap in history), default=0)),
+                    shortcut.user_message_id,
+                    shortcut.last_message_text,
+                ),
             )
             self._mark_state_dirty()
         return events
 
+    def _store_chat_cursor(self, chat_id: int, value: tuple[int, int, str]) -> None:
+        self._chats[chat_id] = value
+        while len(self._chats) > self.chat_state_limit:
+            self._chats.pop(next(iter(self._chats)))
+
     async def _history_since(self, raw, chat_id: int, newest_id: int, stored: int):
-        """Read history pages until the stored cursor is reached; one page may not cover the gap."""
+        """Read history pages until the stored cursor is reached.
+
+        When the first attempt is too small the window doubles on the next
+        tick instead of retrying the same few pages forever.  The cursor is
+        left untouched until the whole gap has been collected.
+        """
         collected: dict[int, object] = {}
         last = newest_id + 1
         complete = False
-        for _ in range(self.chat_history_batches):
+        attempts = self._chat_history_attempts.get(chat_id, 0)
+        batches = min(
+            self.chat_history_max_batches,
+            self.chat_history_batches * (2**attempts),
+        )
+        for _ in range(batches):
             batch = await raw.chats.history(chat_id, last, retry=False)
             if not batch:
-                complete = True
+                # A bookmark cursor ahead of the stored cursor means there is
+                # a gap; an empty page is not proof that the gap is closed.
+                complete = newest_id <= stored + 1
                 break
             for snap in batch:
                 if stored < snap.id < last:
@@ -410,6 +464,15 @@ class EventListener:
                 complete = True
                 break
             last = oldest
+        if complete:
+            self._chat_history_attempts.pop(chat_id, None)
+        else:
+            self._chat_history_attempts[chat_id] = min(attempts + 1, 16)
+            logger.warning(
+                "FunPay chat %s history gap exceeds %s pages; retrying with a larger window",
+                chat_id,
+                batches,
+            )
         return [collected[key] for key in sorted(collected)], complete
 
     def _order_diff(self, rows, buyer: int, seller: int, *, complete: bool = True):
@@ -466,7 +529,7 @@ class EventListener:
         if not getattr(self, ready_name):
             if not complete:
                 return []
-            events = []
+            events: list[FunPayEvent] = []
             for row in rows:
                 saved[row.id] = row.status
                 order = self.client.orders._from_shortcut(row)
@@ -476,7 +539,7 @@ class EventListener:
             setattr(self, ready_name, True)
             self._mark_state_dirty()
             return events
-        events = [changed(client=self.client, buyer_count=buyer, seller_count=seller)]
+        events = []
         seen: set[str] = set()
         changed_state = False
         for row in rows:
@@ -504,6 +567,7 @@ class EventListener:
                 del saved[gone]
                 changed_state = True
         if changed_state:
+            events.insert(0, changed(client=self.client, buyer_count=buyer, seller_count=seller))
             self._mark_state_dirty()
         return events
 
@@ -525,7 +589,7 @@ class EventListener:
             return True
         try:
             self._restore_state(data)
-        except (KeyError, TypeError, ValueError) as exc:
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
             logger.warning("FunPay state is malformed, starting fresh: %s", exc)
             self._reset_state()
         else:
@@ -541,6 +605,7 @@ class EventListener:
         self._orders_ready = False
         self._purchases_ready = False
         self._last_counts = None
+        self._chat_history_attempts.clear()
         self._state_dirty = False
 
     def _restore_state(self, data: dict[str, Any]) -> None:
@@ -567,11 +632,15 @@ class EventListener:
             if not isinstance(entry, list) or len(entry) != 2:
                 raise ValueError("bad sent entry")
             chat_id = entry[0]
+            if isinstance(chat_id, bool) or not isinstance(chat_id, (int, str)):
+                raise ValueError("sent chat id must be an integer or string")
             if isinstance(chat_id, str) and chat_id.isdigit():
                 chat_id = int(chat_id)
             sent.append((chat_id, int(entry[1])))
 
         self._chats = chats
+        while len(self._chats) > self.chat_state_limit:
+            self._chats.pop(next(iter(self._chats)))
         self._orders = orders
         self._purchases = purchases
         self._chat_ready, self._orders_ready, self._purchases_ready = (bool(flag) for flag in ready)
@@ -591,7 +660,7 @@ class EventListener:
     def _snapshot(self) -> dict[str, Any]:
         sent: list[list[int | str]] = []
         for chat_id, ids in self.sent_ids.items():
-            if isinstance(chat_id, int) or not chat_id.isdigit():
+            if isinstance(chat_id, int) or not (isinstance(chat_id, str) and chat_id.isdigit()):
                 sent.extend([chat_id, message_id] for message_id in sorted(ids))
         return {
             "version": 1,

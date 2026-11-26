@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any, Literal
+from weakref import WeakValueDictionary
 
 from bs4 import BeautifulSoup
 
@@ -26,7 +27,7 @@ def _error_message(response) -> str | None:
 class RawChats(RawBase):
     def __init__(self, transport) -> None:
         super().__init__(transport)
-        self._send_locks: dict[str, asyncio.Lock] = {}
+        self._send_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 
     async def history(self, chat_id: int | str, last_message_id: int, *, retry: bool = True):
         async def run():
@@ -79,7 +80,8 @@ class RawChats(RawBase):
         image_id: int | None,
         leave_as_unread: bool,
     ):
-        del leave_as_unread
+        if leave_as_unread:
+            raise ValueError("FunPay does not support leaving a sent message as unread")
         request: dict[str, Any] = {
             "action": "chat_message",
             "data": {"node": chat_id, "last_message": -1, "content": text or ""},

@@ -20,7 +20,10 @@ def _user_id(href: str | None) -> int:
     return int(head) if head.isdigit() else 0
 
 
-def _status(classes: list[str]) -> OrderStatuses:
+def _status(classes: list[str], text: str = "") -> OrderStatuses:
+    lowered = (text or "").lower()
+    if "частичн" in lowered or "partially refunded" in lowered:
+        return OrderStatuses.PARTIALLY_REFUNDED
     if "warning" in classes:
         return OrderStatuses.REFUNDED
     if "info" in classes:
@@ -55,7 +58,7 @@ def parse_order_list(html: str, *, side: OrderSide) -> tuple[str | None, list[Or
         orders.append(
             OrderShortcut(
                 id=order_id,
-                status=_status(attr_list(row, "class")),
+                status=_status(attr_list(row, "class"), row.get_text(" ", strip=True)),
                 side=side,
                 description=desc_node.get_text(" ", strip=True) if desc_node is not None else "",
                 price=price,
@@ -86,7 +89,11 @@ def _marked(text: str | None) -> bool:
     return bool(text and (text.endswith(BOT_MARK) or text.endswith(OLD_BOT_MARK)))
 
 
-def _chat_id(value) -> int | None:
+def _chat_id(value, node_id=None) -> int | None:
+    if isinstance(node_id, int):
+        return node_id
+    if isinstance(node_id, str) and node_id.isdigit():
+        return int(node_id)
     if isinstance(value, int):
         return value
     if isinstance(value, str) and value.isdigit():
@@ -137,7 +144,7 @@ def parse_order_api(data: dict) -> OrderSnapshot:
         buyer_id=int(buyer_id or 0),
         subcategory_name=node.get("name") or section.get("name") or section.get("title"),
         html="",
-        chat_id=_chat_id(chat.get("node_name")),
+        chat_id=_chat_id(chat.get("node_name"), chat.get("node_id")),
         amount=amount,
         review=review,
         seller_username=seller.get("name"),
