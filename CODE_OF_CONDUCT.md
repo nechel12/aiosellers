@@ -34,5 +34,5 @@ Do not post sensitive incident details or personal data in public issues or
 pull requests. Contact [@nechel12](https://github.com/nechel12) through a
 private channel if you already have one, or ask how to reach the maintainer
 privately without posting details. For abuse on GitHub, you can also use
-[GitHub's reporting tools](https://docs.github.com/en/site-policy/acceptable-use-policies/github-acceptable-use-policies#reporting-abuse).
+[GitHub's reporting tools](https://docs.github.com/en/communities/maintaining-your-safety-on-github/reporting-abuse-or-spam).
 Maintainers should limit access to a report to people who need it to respond.
