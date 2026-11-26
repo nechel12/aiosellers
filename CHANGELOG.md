@@ -8,10 +8,13 @@ All notable changes to this project are documented in this file.
 
 - PlayerOK review polling now queues active deals that existed at listener
   startup and no longer drops them after a short 15-minute window; review ids
-  are remembered so existing reviews are not emitted again.
+  are remembered so existing reviews are not emitted again. Old checkpoints
+  seed active deals without dropping their pending reviews.
 - PlayerOK reconnect resync now replays every unprocessed message in the recent
   page, not just `lastMessage`/`{{ITEM_PAID}}`; newly discovered chats are
-  subscribed immediately.
+  subscribed immediately. Resuming from a checkpoint no longer marks messages
+  missed during downtime as already seen. Concurrent collectors no longer
+  emit duplicate payment events.
 - PlayerOK own messages are skipped by default (`include_own` opt-in), image
   messages produce `NewMessageEvent`, and `NewReviewEvent` carries the review.
 - PlayerOK filtered chat/deal pagination no longer stops after the first page
@@ -21,12 +24,15 @@ All notable changes to this project are documented in this file.
   fixed.
 - PlayerOK `close()` now stops an active listener; `aclose()` wakes a blocked
   event consumer; state loading during `listen()` is retried.
-- PlayerOK WebSocket URL/origin follow `base_url`/`ws_url`; Cloudflare detection
-  no longer matches ordinary chat text.
+- PlayerOK sends one WebSocket `Origin` header, preserves the scheme and port
+  of custom base URLs, and honors an explicit `ws_url`. Cloudflare detection no
+  longer matches ordinary chat text.
 - FunPay review `stars` filters force a fresh order lookup instead of using a
   cached shortcut order.
 - FunPay chat/order gap pagination now grows its page window until the gap is
-  collected, and listener options are exposed through `listen()`.
+  collected, and listener options are exposed through `listen()`. Sparse
+  message IDs no longer stall new chats, and item descriptions no longer
+  affect refund status parsing.
 - FunPay identity-map merges are partial for shortcut rows and full for detail
   rows, so list refreshes no longer erase order/product details.
 - FunPay message history pagination, `OrderAPI.iter(limit=...)`, Ukrainian
@@ -37,12 +43,16 @@ All notable changes to this project are documented in this file.
   input.
 - GGsel partial product updates no longer erase fields, new chats only replay
   recent history, one malformed row no longer stops polling, chat lookup covers
-  a wider window, and history/category pagination is bounded correctly.
+  a wider window, and history/category pagination is bounded correctly. Active
+  chat cursors survive a small `state_limit` without repeated initialization
+  events.
 - `SellerHub` auto-generated session ids skip explicitly registered ids.
 - Identity maps are bounded and shared; long-running clients can cap them with
   `identity_map_limit`.
 - Event listeners commit durable state after events are yielded by the public
-  `listen()` path, reducing event loss on crashes.
+  `listen()` path, reducing event loss on crashes. For PlayerOK, adding events
+  to the internal queue does not commit them, and events from a single payment
+  message are committed together.
 
 ## [0.3.7] - 2026-11-18
 

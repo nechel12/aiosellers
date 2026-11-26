@@ -97,6 +97,12 @@ reconnects with backoff and replays unprocessed messages from recent chats after
 a reconnect. The seller's own messages are skipped by default
 (`include_own=True` opts in).
 
+With a `StateStore`, `client.listen()` checkpoints messages and reviews when
+iteration resumes after the relevant events. Closing the stream before
+resuming can cause those events to be replayed within the listener's recovery
+window. Make handlers idempotent; the stream doesn't guarantee exactly-once
+delivery.
+
 ## GGsel
 
 ```python
