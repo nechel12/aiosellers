@@ -20,19 +20,7 @@ The import package is always:
 import aiosellers
 ```
 
-## Updating to 0.4.0
-
-- Set `PlayerokClientConfig(include_own=True)` if the application handles the
-  seller's own messages. The listener no longer emits them by default.
-- Identity-map entries can be evicted once a cache reaches its limit. Set
-  `identity_map_limit=None` if the application needs identity to be preserved
-  for the entire session.
-- Send FunPay text and images separately. Remove `leave_as_unread=True` from
-  send calls. FunPay now raises `ValueError` for those unsupported options.
-- FunPay `orders.iter(limit=...)` now caps the total number of orders yielded,
-  not the number of orders per page.
-
-## Unreleased changes
+## Updating to 0.5.0
 
 - For a single-session worker, opt into `hub.stream(error_policy="raise")`
   and catch `aiosellers.AuthError`. For several sessions, use
@@ -47,6 +35,18 @@ import aiosellers
   set `ws_use_system_proxy=True` or provide an explicit `proxy`.
 - PlayerOK downloads larger than 16 MiB require an explicit `max_bytes`.
   Compressed responses that ignore the identity-encoding request are rejected.
+
+## Updating to 0.4.0
+
+- Set `PlayerokClientConfig(include_own=True)` if the application handles the
+  seller's own messages. The listener no longer emits them by default.
+- Identity-map entries can be evicted once a cache reaches its limit. Set
+  `identity_map_limit=None` if the application needs identity to be preserved
+  for the entire session.
+- Send FunPay text and images separately. Remove `leave_as_unread=True` from
+  send calls. FunPay now raises `ValueError` for those unsupported options.
+- FunPay `orders.iter(limit=...)` now caps the total number of orders yielded,
+  not the number of orders per page.
 
 ## What changed in 0.3.0
 

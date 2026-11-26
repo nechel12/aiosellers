@@ -4,16 +4,20 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-26
+
 ### Added
 
-- `SellerHub.stream(error_policy="raise" | "yield")` lets callers observe session
-  failures. `buffered=False` defers advancing each listener until its event has
-  been consumed. `HubEvent.to_dict()` provides a versioned JSON representation.
+- `SellerHub.stream()` accepts `error_policy="raise"` or `error_policy="yield"`
+  to surface session failures. With `buffered=False`, the listener does not
+  advance until the consumer requests the next event. `HubEvent.to_dict()`
+  provides a versioned JSON representation.
 - Added portable auth, configuration, transient and rate-limit error classes.
   Platform-specific exception imports still work.
 - Added `SellerSession` for bounded message history, own listings, recent
   orders/deals, and sending text. It supports a deadline per operation.
 - PlayerOK offers opt-in checkpoint write batching via `state_flush_interval`.
+- PlayerOK can emit WebSocket connection status changes with `connection_events=True`.
 
 ### Changed
 
