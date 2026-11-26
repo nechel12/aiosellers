@@ -7,7 +7,9 @@ import logging
 import random
 import uuid
 from collections import deque
+from collections.abc import Callable
 from datetime import datetime, timezone
+from functools import partial
 from typing import TYPE_CHECKING, Any, AsyncIterator, cast
 
 from pydantic import ValidationError
@@ -34,6 +36,7 @@ _WS_URL = "wss://ws.playerok.com/graphql"
 _WS_ACK_TIMEOUT = 15.0
 _WS_RECONNECT_INITIAL = 1.0
 _WS_RECONNECT_MAX = 30.0
+_EVENT_BUFFER_SIZE = 256
 _STOP = object()
 _DRIFT_WARNED: set[tuple[str, str]] = set()
 
@@ -204,6 +207,7 @@ class EventListener:
         self.sent: list[str] = []
         self.processed_message_ids: set[str] = set()
         self._processed_order: deque[str] = deque()
+        self._message_feed_ready = False
         self.processed_deal_ids: set[str] = set()
         self._processed_deal_order: deque[str] = deque()
         self.known_deal_ids: set[str] = set()
@@ -225,6 +229,11 @@ class EventListener:
         self._ws: Any = None
         self._tasks: list[asyncio.Task[Any]] = []
         self._queue: asyncio.Queue[Any] | None = None
+        self._pending_deliveries: dict[int, tuple[PlayerokEvent, Callable[[], None]]] = {}
+        self._pending_message_ids: set[str] = set()
+        self._pending_deal_ids: set[str] = set()
+        self._pending_review_ids: set[str] = set()
+        self._pending_review_deals: set[str] = set()
         self._state_loaded = False
         self._state_key: str | None = None
         self._state_dirty = False
@@ -400,7 +409,7 @@ class EventListener:
                 fresh = (
                     now - _as_utc(message.created_at)
                 ).total_seconds() <= self.history_grace_seconds
-                unseen = message.id not in self.processed_message_ids
+                unseen = not self._message_seen(message.id)
                 if new_chat or unseen or fresh:
                     events.extend(await self._sync_chat_messages(chat_schema, now))
             except asyncio.CancelledError:
@@ -415,7 +424,7 @@ class EventListener:
         await self._ensure_state_loaded()
         events: list[PlayerokEvent] = []
         for deal_id in list(self.review_deal_ids):
-            if not self._should_check_review(deal_id):
+            if deal_id in self._pending_review_deals or not self._should_check_review(deal_id):
                 continue
             try:
                 schema = await self._raw().deals.get_deal(deal_id)
@@ -425,6 +434,8 @@ class EventListener:
                 if review.id in self._review_seen_ids:
                     self._remove_review_deal(deal_id)
                     continue
+                if review.id in self._pending_review_ids:
+                    continue
                 deal = self.client.deals._create_deal(schema)
                 chat = None
                 if deal.chat_id:
@@ -433,11 +444,14 @@ class EventListener:
                     chat = self.client.chats._create_chat(schema.chat)
                 if chat is None:
                     continue
-                self._remember_review_id(review.id)
-                events.append(
-                    NewReviewEvent(client=self.client, chat=chat, deal=deal, review=review)
+                event = NewReviewEvent(client=self.client, chat=chat, deal=deal, review=review)
+                if self._queue is not None:
+                    self._pending_review_ids.add(review.id)
+                    self._pending_review_deals.add(deal_id)
+                self._after_delivery(
+                    event, partial(self._commit_review_delivery, deal_id, review.id)
                 )
-                self._remove_review_deal(deal_id)
+                events.append(event)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -445,6 +459,12 @@ class EventListener:
         if persist:
             await self._save_state()
         return events
+
+    def _commit_review_delivery(self, deal_id: str, review_id: str) -> None:
+        self._pending_review_ids.discard(review_id)
+        self._pending_review_deals.discard(deal_id)
+        self._remember_review_id(review_id)
+        self._remove_review_deal(deal_id)
 
     def _remove_review_deal(self, deal_id: str) -> None:
         if deal_id in self.review_deal_ids:
@@ -464,7 +484,7 @@ class EventListener:
                 await self._save_state()
 
     async def _message_events(self, chat, message: ChatMessageSchema) -> list[PlayerokEvent]:
-        if message.id in self.processed_message_ids:
+        if self._message_seen(message.id):
             return []
         me_id = self.client.me_id
         if message.user is not None and me_id and message.user.id == me_id and not self.include_own:
@@ -480,8 +500,7 @@ class EventListener:
                 chat=chat,
                 message=self.client.chats.messages._create_message(message, chat.id),
             )
-            self._mark_message(message.id)
-            return [event]
+            return self._finish_message(message.id, [event])
 
         kinds = classify_message(message.text)
         if kinds == [EventTypes.NEW_MESSAGE]:
@@ -490,27 +509,33 @@ class EventListener:
                 chat=chat,
                 message=self.client.chats.messages._create_message(message, chat.id),
             )
-            self._mark_message(message.id)
-            return [event]
+            return self._finish_message(message.id, [event])
 
         actual = await self._refetch_message(chat.id, message.id) or message
         deal_schema = actual.deal
         if deal_schema is None or not deal_schema.id:
             return []
-        if EventTypes.NEW_DEAL in kinds and deal_schema.id in self.processed_deal_ids:
-            self._mark_message(message.id)
-            return []
+        new_deal = EventTypes.NEW_DEAL in kinds
+        if new_deal:
+            if deal_schema.id in self.processed_deal_ids:
+                self._mark_message(message.id)
+                return []
+            if deal_schema.id in self._pending_deal_ids:
+                return []
 
         fetched = await self._refetch_deal(deal_schema.id)
         if fetched is not None:
             deal_schema = fetched
         # The socket and chat poll can both reach this point after network
         # awaits. Check again before constructing and recording the events.
-        if message.id in self.processed_message_ids:
+        if self._message_seen(message.id):
             return []
-        if EventTypes.NEW_DEAL in kinds and deal_schema.id in self.processed_deal_ids:
-            self._mark_message(message.id)
-            return []
+        if new_deal:
+            if deal_schema.id in self.processed_deal_ids:
+                self._mark_message(message.id)
+                return []
+            if deal_schema.id in self._pending_deal_ids:
+                return []
         deal = self.client.deals._create_deal(deal_schema)
         entity_message = self.client.chats.messages._create_message(actual, chat.id)
         events: list[PlayerokEvent] = []
@@ -528,12 +553,38 @@ class EventListener:
                 )
             )
 
-        if EventTypes.NEW_DEAL in kinds:
-            self._remember_processed_deal(deal_schema.id)
-            self._remember_known_deal(deal_schema.id)
-            self._queue_review_deal(deal_schema.id)
-        self._mark_message(message.id)
+        return self._finish_message(message.id, events, deal_schema.id if new_deal else None)
+
+    def _message_seen(self, message_id: str) -> bool:
+        return message_id in self.processed_message_ids or message_id in self._pending_message_ids
+
+    def _finish_message(
+        self, message_id: str, events: list[PlayerokEvent], deal_id: str | None = None
+    ) -> list[PlayerokEvent]:
+        if self._queue is not None:
+            self._pending_message_ids.add(message_id)
+            if deal_id is not None:
+                self._pending_deal_ids.add(deal_id)
+        self._after_delivery(
+            events[-1], partial(self._commit_message_delivery, message_id, deal_id)
+        )
         return events
+
+    def _commit_message_delivery(self, message_id: str, deal_id: str | None) -> None:
+        self._pending_message_ids.discard(message_id)
+        if deal_id is not None:
+            self._pending_deal_ids.discard(deal_id)
+            self._remember_processed_deal(deal_id)
+            self._remember_known_deal(deal_id)
+            self._queue_review_deal(deal_id)
+        self._mark_message(message_id)
+
+    def _after_delivery(self, event: PlayerokEvent, commit: Callable[[], None]) -> None:
+        if self._queue is None:
+            # Direct polling helpers have no separate consumer.
+            commit()
+        else:
+            self._pending_deliveries[id(event)] = (event, commit)
 
     async def listen(
         self, *, messages: bool = True, reviews: bool = True
@@ -554,7 +605,9 @@ class EventListener:
         if self._stop.is_set():
             return
 
-        queue: asyncio.Queue[Any] = asyncio.Queue()
+        if self._queue is not None:
+            raise RuntimeError("This listener already has a consumer")
+        queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=_EVENT_BUFFER_SIZE)
         self._queue = queue
 
         async def produce(iterator: AsyncIterator[PlayerokEvent]) -> None:
@@ -566,30 +619,39 @@ class EventListener:
             except Exception:
                 logger.exception("Event feed task failed")
 
-        tasks: list[asyncio.Task[Any]] = []
-        if messages:
-            page = await self._raw().chats.get_chats(user_id=self._me_id(), count=24)
-            chats = list(page.chats) if page is not None else []
-            if not self._needs_resync:
-                self.remember_history(chats)
-            for chat_schema in chats:
-                chat_schema = self.remember_chat(chat_schema)
-                self._remember_chat_id(chat_schema.id)
-                chat = self.client.chats._create_chat(chat_schema)
-                await queue.put(ChatInitializedEvent(client=self.client, chat=chat))
-            await self._save_state()
-            tasks.append(asyncio.create_task(produce(self._socket_events())))
-            tasks.append(asyncio.create_task(produce(self._new_chat_events())))
-        if reviews:
-            tasks.append(asyncio.create_task(produce(self._review_events())))
-        self._tasks = tasks
-
         try:
+            if messages:
+                page = await self._raw().chats.get_chats(user_id=self._me_id(), count=24)
+                if self._stop.is_set():
+                    return
+                chats = list(page.chats) if page is not None else []
+                if not self._needs_resync:
+                    self.remember_history(chats)
+                if not self._message_feed_ready:
+                    self._message_feed_ready = True
+                    self._mark_state_dirty()
+                for chat_schema in chats:
+                    chat_schema = self.remember_chat(chat_schema)
+                    self._remember_chat_id(chat_schema.id)
+                    chat = self.client.chats._create_chat(chat_schema)
+                    await queue.put(ChatInitializedEvent(client=self.client, chat=chat))
+                await self._save_state()
+                if self._stop.is_set():
+                    return
+                self._tasks.append(asyncio.create_task(produce(self._socket_events())))
+                self._tasks.append(asyncio.create_task(produce(self._new_chat_events())))
+            if reviews:
+                self._tasks.append(asyncio.create_task(produce(self._review_events())))
+
             while not self._stop.is_set():
                 item = await queue.get()
-                if item is _STOP:
+                if item is _STOP or self._stop.is_set():
                     break
                 yield item
+                delivery = self._pending_deliveries.pop(id(item), None)
+                if delivery is not None:
+                    delivery[1]()
+                    await self._save_state()
         finally:
             await self.aclose()
             self._queue = None
@@ -598,13 +660,19 @@ class EventListener:
         self._stop.set()
         queue = self._queue
         if queue is not None:
-            queue.put_nowait(_STOP)
+            with contextlib.suppress(asyncio.QueueFull):
+                queue.put_nowait(_STOP)
         for task in self._tasks:
             task.cancel()
         for task in self._tasks:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
         self._tasks.clear()
+        self._pending_deliveries.clear()
+        self._pending_message_ids.clear()
+        self._pending_deal_ids.clear()
+        self._pending_review_ids.clear()
+        self._pending_review_deals.clear()
         await self._save_state()
         ws = self._ws
         self._ws = None
@@ -863,7 +931,7 @@ class EventListener:
             default=None,
         )
         for message in rows:
-            if message.id in self.processed_message_ids:
+            if self._message_seen(message.id):
                 continue
             created_at = _as_utc(message.created_at)
             if anchor is not None:
@@ -892,11 +960,7 @@ class EventListener:
         last = chat_schema.last_message
         unread = chat_schema.unread_messages_counter
         has_unread = isinstance(unread, (int, float)) and unread > 0
-        if (
-            last is not None
-            and last.id not in self.processed_message_ids
-            and (not was_known or has_unread)
-        ):
+        if last is not None and not self._message_seen(last.id) and (not was_known or has_unread):
             now = datetime.now(timezone.utc)
             events.extend(await self._sync_chat_messages(chat_schema, now))
         return events
@@ -1057,6 +1121,7 @@ class EventListener:
 
         self.processed_message_ids = set(messages)
         self._processed_order = deque(messages)
+        self._message_feed_ready = bool(data.get("message_feed_ready"))
         self.processed_deal_ids = set(processed_deals)
         self._processed_deal_order = deque(dict.fromkeys(processed_deals))
         self.known_deal_ids = set(known_deals)
@@ -1071,7 +1136,7 @@ class EventListener:
         while len(self._review_seen_order) > self.state_limit:
             self._review_seen_ids.discard(self._review_seen_order.popleft())
         self._deals_baseline_ready = deals_ready
-        if messages or known_deals:
+        if self._message_feed_ready or messages or known_deals:
             # Recover messages missed while the process was down, the same way
             # a websocket reconnect does.
             self._needs_resync = True
@@ -1079,6 +1144,7 @@ class EventListener:
     def _reset_state(self) -> None:
         self.processed_message_ids.clear()
         self._processed_order.clear()
+        self._message_feed_ready = False
         self.processed_deal_ids.clear()
         self._processed_deal_order.clear()
         self.known_deal_ids.clear()
@@ -1103,6 +1169,7 @@ class EventListener:
         return {
             "version": 1,
             "messages": list(self._processed_order),
+            "message_feed_ready": self._message_feed_ready,
             "processed_deals": list(self._processed_deal_order),
             "known_deals": list(self._known_deal_order),
             "review_deals": list(self.review_deal_ids),

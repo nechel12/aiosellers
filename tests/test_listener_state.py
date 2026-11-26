@@ -372,6 +372,95 @@ class _FlakyPlayerokStateStore:
 
 
 class PlayerokStateTests(unittest.IsolatedAsyncioTestCase):
+    async def test_public_feed_closing_with_queued_message_keeps_it_retryable(self):
+        store = MemoryStateStore()
+        client = _playerok_client(_PlayerokRaw())
+        schema = ChatSchema(id="c1", type=ChatTypes.PM)
+        client._raw.get_chats = mock.AsyncMock(return_value=SimpleNamespace(chats=[schema]))
+        listener = _playerok_listener(client, store)
+        queued = asyncio.Event()
+
+        async def socket_events():
+            chat = listener.chat_from(schema)
+            for event in await listener.events_for_message(
+                chat, _playerok_message("queued", "hello"), persist=False
+            ):
+                yield event
+            # A concurrent producer can save unrelated, legitimate progress.
+            listener._mark_message("unrelated")
+            await listener._save_state()
+            queued.set()
+
+        with mock.patch.object(listener, "_socket_events", socket_events):
+            stream = listener.listen(reviews=False)
+            self.assertIs((await anext(stream)).type, PlayerokEventTypes.CHAT_INITIALIZED)
+            await asyncio.wait_for(queued.wait(), 1)
+            await listener.aclose()
+            self.assertEqual([event async for event in stream], [])
+
+        self.assertEqual((await store.get("playerok:me:listener"))["messages"], ["unrelated"])
+        restarted = _playerok_listener(_playerok_client(_PlayerokRaw()), store)
+        chat = restarted.chat_from(schema)
+        replay = await restarted.events_for_message(chat, _playerok_message("queued", "hello"))
+        self.assertEqual([event.message.id for event in replay], ["queued"])
+
+    async def test_public_feed_commits_all_events_for_payment_together(self):
+        store = MemoryStateStore()
+        client = _playerok_client(_PlayerokRaw(deal=_playerok_deal()))
+        listener = _playerok_listener(client, store)
+
+        async def socket_events():
+            chat = listener.chat_from(ChatSchema(id="c1", type=ChatTypes.PM))
+            for message in (
+                _playerok_message("paid", "{{ITEM_PAID}}", "deal-1"),
+                _playerok_message("queued", "hello"),
+            ):
+                for event in await listener.events_for_message(chat, message, persist=False):
+                    yield event
+
+        with mock.patch.object(listener, "_socket_events", socket_events):
+            stream = listener.listen(reviews=False)
+            try:
+                self.assertIs(
+                    (await asyncio.wait_for(anext(stream), 1)).type, PlayerokEventTypes.NEW_DEAL
+                )
+                self.assertIs(
+                    (await asyncio.wait_for(anext(stream), 1)).type, PlayerokEventTypes.ITEM_PAID
+                )
+                snapshot = await store.get("playerok:me:listener")
+                self.assertEqual(snapshot["messages"], [])
+                self.assertEqual(snapshot["processed_deals"], [])
+
+                self.assertEqual((await asyncio.wait_for(anext(stream), 1)).message.id, "queued")
+                snapshot = await store.get("playerok:me:listener")
+                self.assertEqual(snapshot["messages"], ["paid"])
+                self.assertEqual(snapshot["processed_deals"], ["deal-1"])
+                self.assertEqual(snapshot["review_deals"], ["deal-1"])
+            finally:
+                await stream.aclose()
+        self.assertEqual((await store.get("playerok:me:listener"))["messages"], ["paid"])
+
+    async def test_review_yielded_before_close_remains_pending_without_acknowledgement(self):
+        store = MemoryStateStore()
+        seed = _playerok_listener(_playerok_client(_PlayerokRaw(deal=_playerok_deal())), store)
+        schema = ChatSchema(id="c1", type=ChatTypes.PM)
+        await seed.events_for_message(
+            seed.chat_from(schema), _playerok_message("paid", "{{ITEM_PAID}}", "deal-1")
+        )
+        client = _playerok_client(_PlayerokRaw(deal=_playerok_deal(reviewed=True)))
+        listener = _playerok_listener(client, store)
+        stream = listener.listen(messages=False)
+        try:
+            self.assertIs(
+                (await asyncio.wait_for(anext(stream), 1)).type, PlayerokEventTypes.NEW_REVIEW
+            )
+        finally:
+            await stream.aclose()
+
+        snapshot = await store.get("playerok:me:listener")
+        self.assertEqual(snapshot["review_deals"], ["deal-1"])
+        self.assertEqual(snapshot["seen_reviews"], [])
+
     async def test_restart_does_not_baseline_messages_missed_while_offline(self):
         store = MemoryStateStore()
         await store.set("playerok:me:listener", {"version": 1, "messages": ["seen"]})
