@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-26
+
+### Changed
+
+- PlayerOK ignores the seller's own messages by default. Set
+  `include_own=True` to continue receiving them.
+- Identity maps are shared and bounded by default. Set `identity_map_limit=None`
+  to retain cached entities for the entire session.
+- FunPay rejects sending text and an image in one message and passing
+  `leave_as_unread=True` with `ValueError`. These options were previously ignored.
+- FunPay `OrderAPI.iter(limit=...)` applies the limit to the entire iterator
+  rather than to each page.
+
 ### Fixed
 
 - PlayerOK queues active deals for review polling at startup and keeps them
@@ -13,8 +26,8 @@ All notable changes to this project are documented in this file.
   window and subscribes to newly discovered chats. Resuming from a checkpoint
   no longer marks messages missed during downtime as seen. Concurrent collectors
   deduplicate payment events.
-- PlayerOK own messages are skipped by default (`include_own` opt-in), image
-  messages produce `NewMessageEvent`, and `NewReviewEvent` carries the review.
+- PlayerOK image messages produce `NewMessageEvent`, and `NewReviewEvent`
+  carries the review.
 - PlayerOK filtered chat/deal pagination no longer stops after the first page
   when every row is filtered out.
 - PlayerOK `Item.game_id`, `Chat.get_deals().item_id`, missing-user raw lookups,
@@ -32,21 +45,17 @@ All notable changes to this project are documented in this file.
   message IDs no longer stall new chats, and item descriptions no longer
   affect refund status parsing.
 - FunPay identity-map merges are partial for shortcut rows and full for detail
-  rows, so list refreshes no longer erase order/product details.
-- FunPay message history pagination, `OrderAPI.iter(limit=...)`, Ukrainian
+  rows, so list refreshes no longer erase order details.
+- FunPay message history pagination, Ukrainian
   system-message classification, locale-independent stale-cookie detection,
   custom-host cookie storage, badge parsing and malformed `sent` state are fixed.
-- Concurrent calls share FunPay startup. Sending text and an image in one
-  message or passing `leave_as_unread=True` now raises `ValueError` instead of
-  ignoring the unsupported input.
+- Concurrent calls share FunPay startup.
 - GGsel partial product updates no longer erase fields, new chats only replay
   recent history, one malformed row no longer stops polling, chat lookup covers
   a wider window, and history/category pagination is bounded correctly. Active
   chat cursors survive a small `state_limit` without repeated initialization
   events.
 - `SellerHub` auto-generated session ids skip explicitly registered ids.
-- Identity maps are bounded and shared; long-running clients can cap them with
-  `identity_map_limit`.
 - Event listeners commit durable state after events are yielded by the public
   `listen()` path, reducing event loss on crashes. For PlayerOK, adding events
   to the internal queue does not commit them, and events from a single payment
