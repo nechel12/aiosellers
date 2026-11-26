@@ -147,6 +147,7 @@ class EventListener:
 
     async def _chat_events(self) -> list[Any]:
         items = await self._chat_items()
+        active = {item.id_i for item in items}
         events: list[Any] = []
 
         if not self._chats_ready:
@@ -160,7 +161,8 @@ class EventListener:
                     continue
                 chat = self.client.chats._to_chat(item)
                 events.append(InitialChatEvent(client=self.client, chat=chat))
-                self._store_chat_state(item.id_i, state)
+                self._chats[item.id_i] = state
+            self._prune_chat_state(active)
             return events
 
         changed = False
@@ -175,7 +177,7 @@ class EventListener:
                     continue
                 events.append(InitialChatEvent(client=self.client, chat=chat))
                 events.extend(new_events)
-                self._store_chat_state(item.id_i, state)
+                self._chats[item.id_i] = state
                 changed = True
                 continue
 
@@ -201,14 +203,23 @@ class EventListener:
             known.count = item.cnt_msg
             changed = True
 
-        if changed:
+        pruned = self._prune_chat_state(active)
+        if changed or pruned:
             self._mark_state_dirty()
         return events
 
-    def _store_chat_state(self, chat_id: int, state: _ChatState) -> None:
-        self._chats[chat_id] = state
-        while len(self._chats) > self.state_limit:
-            self._chats.pop(next(iter(self._chats)))
+    def _prune_chat_state(self, active: set[int]) -> bool:
+        # Hold a cursor for every chat in the current scan. A smaller state
+        # limit may evict inactive chats, but must not make this scan churn.
+        limit = max(self.state_limit, len(active))
+        pruned = False
+        for chat_id in tuple(self._chats):
+            if len(self._chats) <= limit:
+                break
+            if chat_id not in active:
+                del self._chats[chat_id]
+                pruned = True
+        return pruned
 
     async def _new_chat_state(self, item: ChatItem, chat: Chat) -> tuple[_ChatState, list[Any]]:
         if not self._recent(item.last_message):
@@ -243,7 +254,7 @@ class EventListener:
                     items.append(item)
             if response.cnt_pages is not None and page >= response.cnt_pages:
                 break
-            if not response.items:
+            if not response.items and response.cnt_pages is None:
                 break
             page += 1
         if page > self.chat_page_limit:
@@ -281,8 +292,6 @@ class EventListener:
             for row in fresh:
                 collected[row.id] = row
             cursor = max(collected)
-            if len(rows) < self.history_limit:
-                break
         return [collected[key] for key in sorted(collected)]
 
     async def _client_history(
@@ -430,8 +439,6 @@ class EventListener:
                 count=None if row.get("count") is None else int(row["count"]),
             )
         self._chats = chats
-        while len(self._chats) > self.state_limit:
-            self._chats.pop(next(iter(self._chats)))
         self._chats_ready = bool(data.get("chats_ready"))
         self._sales = self._id_list(data.get("sales"), "sales")[: self.state_limit]
         self._sales_ready = bool(data.get("sales_ready"))

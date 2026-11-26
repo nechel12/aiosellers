@@ -26,6 +26,7 @@ from aiosellers.ggsel.events import (
     NewSaleEvent,
 )
 from aiosellers.ggsel.listener import EventListener
+from aiosellers.ggsel.raw.chats import RawChatService
 from aiosellers.ggsel.raw.sales import RawSaleService
 from aiosellers.ggsel.schemas import (
     BalanceContent,
@@ -792,6 +793,36 @@ class _ApiTests(unittest.IsolatedAsyncioTestCase):
 
 
 class _ListenerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_malformed_chat_and_history_rows_do_not_hide_valid_rows(self):
+        raw = _FakeRaw()
+        raw.chats = RawChatService(mock.Mock())
+        raw.chats._transport.request = mock.AsyncMock(
+            side_effect=[
+                {"cnt_pages": 2, "items": [{"id_i": "bad"}]},
+                {"cnt_pages": 2, "items": [{"id_i": 7, "cnt_msg": 2}, {"id_i": "bad"}]},
+                [{"id": "bad"}, {"id": 5, "message": "valid"}],
+            ]
+        )
+        listener = EventListener(_client(raw))
+        events = await listener.tick(sales=False, reviews=False)
+
+        self.assertEqual([event.chat.id for event in events], [7])
+        self.assertEqual(listener._chats[7].last_id, 5)
+
+    async def test_small_state_limit_keeps_cursors_for_all_polled_chats(self):
+        raw = _FakeRaw()
+        raw.chats.items = [_chat_item(7, cnt_msg=0), _chat_item(8, cnt_msg=0)]
+        store = MemoryStateStore()
+        listener = EventListener(_client(raw), state=store, state_limit=1)
+
+        initial = await listener.tick(sales=False, reviews=False)
+        self.assertEqual([event.chat.id for event in initial], [7, 8])
+        self.assertEqual(await listener.tick(sales=False, reviews=False), [])
+
+        restarted = EventListener(_client(raw), state=store, state_limit=1)
+        self.assertEqual(await restarted.tick(sales=False, reviews=False), [])
+        self.assertEqual(set(restarted._chats), {7, 8})
+
     async def test_first_tick_baselines_and_emits_only_initial_chats(self):
         raw = _FakeRaw()
         raw.chats.items = [_chat_item()]

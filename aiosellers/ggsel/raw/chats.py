@@ -1,10 +1,25 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
+from pydantic import BaseModel, ValidationError
+
 from ..core.exceptions import RequestFailedError
-from ..schemas import ChatList, ChatMessageSchema, SendMessageResponse
+from ..schemas import ChatItem, ChatList, ChatMessageSchema, SendMessageResponse
 from ..transport import GGselTransport
+
+logger = logging.getLogger(__name__)
+
+
+def _valid_rows[Row: BaseModel](model: type[Row], rows: list[Any]) -> list[Row]:
+    result = []
+    for index, row in enumerate(rows):
+        try:
+            result.append(model.model_validate(row))
+        except ValidationError:
+            logger.warning("Skipping malformed GGsel %s row at index %s", model.__name__, index)
+    return result
 
 
 class RawChatService:
@@ -35,7 +50,11 @@ class RawChatService:
         data = await self._transport.request(
             "get", "/api_sellers/api/debates/v2/chats", params=params
         )
-        return ChatList.model_validate(data if isinstance(data, dict) else {})
+        payload = data if isinstance(data, dict) else {}
+        items = payload.get("items")
+        if isinstance(items, list):
+            payload = {**payload, "items": _valid_rows(ChatItem, items)}
+        return ChatList.model_validate(payload)
 
     async def history(
         self,
@@ -59,7 +78,7 @@ class RawChatService:
         data = await self._transport.request("get", "/api_sellers/api/debates/v2", params=params)
         if not isinstance(data, list):
             raise RequestFailedError("GGsel returned an unexpected chat history payload")
-        return [ChatMessageSchema.model_validate(row) for row in data if isinstance(row, dict)]
+        return _valid_rows(ChatMessageSchema, data)
 
     async def send_message(self, chat_id: int | str, message: str) -> SendMessageResponse:
         data = await self._transport.request(
