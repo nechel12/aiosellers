@@ -5,6 +5,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any, cast
 
+from ..core.polling import PollControl
 from ..core.state import StateStore
 from .core.utils import order_id_from, random_tag
 from .events import (
@@ -116,6 +117,7 @@ class EventListener:
         self._state_version = 0
         self._state_lock = asyncio.Lock()
         client._listener = self
+        self.control = PollControl()
 
     def remember_sent(self, chat_id: int | str, message_id: int) -> None:
         self._track_sent(chat_id, message_id)
@@ -152,25 +154,31 @@ class EventListener:
         interval: float | None = None,
     ):
         pause = max(0.1, self.client._config.poll_interval if interval is None else interval)
-        while True:
+        while not self.control.stopped:
             started = time.monotonic()
             transport = self.client._transport
             if transport is not None and time.monotonic() < transport.rate_limited_until:
-                await _sleep(pause)
+                await self.control.wait(pause)
                 continue
-            events = await self.tick(
-                messages=messages,
-                orders=orders,
-                purchases=purchases,
-                reviews=reviews,
-                persist=False,
+            events = await self.control.poll(
+                self.tick(
+                    messages=messages,
+                    orders=orders,
+                    purchases=purchases,
+                    reviews=reviews,
+                    persist=False,
+                )
             )
             for event in events:
+                if self.control.stopped:
+                    return
                 yield event
+            if self.control.stopped:
+                return
             await self._save_state()
             remain = pause - (time.monotonic() - started)
             if remain > 0:
-                await _sleep(remain)
+                await self.control.wait(remain)
 
     async def tick(
         self,
@@ -707,7 +715,3 @@ def _counts(counters: dict | None) -> tuple[int, int]:
     if not isinstance(data, dict):
         return 0, 0
     return int(data.get("buyer") or 0), int(data.get("seller") or 0)
-
-
-async def _sleep(seconds: float) -> None:
-    await asyncio.sleep(seconds)

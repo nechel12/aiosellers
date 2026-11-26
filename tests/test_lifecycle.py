@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from aiosellers import FunPay, FunPayClientConfig, Playerok, PlayerokClientConfig
+from aiosellers import FunPay, FunPayClientConfig, GGsel, Playerok, PlayerokClientConfig
 
 
 class _PollingClient:
@@ -139,7 +139,7 @@ class PlayerokLifecycleTests(unittest.IsolatedAsyncioTestCase):
         rendered = repr(config)
         self.assertNotIn("secret-token", rendered)
         self.assertNotIn("user:pass", rendered)
-        self.assertNotIn("proxy=", rendered)
+        self.assertNotIn(", proxy=", rendered)
 
     async def test_stop_cancels_polling_and_closes(self):
         client = _PollingClient().install(Playerok(PlayerokClientConfig(access_token="token")))
@@ -178,3 +178,34 @@ class FunPayLifecycleTests(unittest.IsolatedAsyncioTestCase):
         client = FunPay(FunPayClientConfig(golden_key="key"))
         client.stop()
         self.assertIsNone(client._polling_task)
+
+
+class PollingCloseTests(unittest.IsolatedAsyncioTestCase):
+    async def test_client_close_stops_inflight_tick_before_transport_close(self):
+        for client, path in (
+            (FunPay(), "aiosellers.funpay.listener.EventListener.tick"),
+            (GGsel(), "aiosellers.ggsel.listener.EventListener.tick"),
+        ):
+            with self.subTest(client=client.platform):
+                started = asyncio.Event()
+                stopped = asyncio.Event()
+
+                async def tick(*args, **kwargs):
+                    started.set()
+                    try:
+                        await asyncio.Future()
+                    finally:
+                        stopped.set()
+
+                async def close_transport():
+                    self.assertTrue(stopped.is_set())
+
+                client._transport = SimpleNamespace(rate_limited_until=0, close=close_transport)
+                with mock.patch(path, side_effect=tick):
+                    stream = client.listen()
+                    next_item = asyncio.create_task(anext(stream))
+                    await asyncio.wait_for(started.wait(), 1)
+                    await asyncio.wait_for(client.close(), 1)
+                    with self.assertRaises(StopAsyncIteration):
+                        await asyncio.wait_for(next_item, 1)
+                self.assertFalse(client._listeners)

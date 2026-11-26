@@ -32,6 +32,22 @@ import aiosellers
 - FunPay `orders.iter(limit=...)` now caps the total number of orders yielded,
   not the number of orders per page.
 
+## Unreleased changes
+
+- For a single-session worker, opt into `hub.stream(error_policy="raise")`
+  and catch `aiosellers.AuthError`. For several sessions, use
+  `error_policy="yield"` and handle `EventKind.ERROR` by session ID. Replace
+  serializers that traverse native events with `HubEvent.to_dict()`.
+- Opt into `buffered=False` and persist the event before advancing the hub if
+  source checkpoint timing matters. Recovery remains bounded by the platform.
+- `state_flush_interval` is opt-in and combines PlayerOK checkpoint writes.
+  Leave it at `0` if minimizing the replay window is more important than
+  reducing storage writes.
+- If PlayerOK WebSockets previously relied on an environment or system proxy,
+  set `ws_use_system_proxy=True` or provide an explicit `proxy`.
+- PlayerOK downloads larger than 16 MiB require an explicit `max_bytes`.
+  Compressed responses that ignore the identity-encoding request are rejected.
+
 ## What changed in 0.3.0
 
 - `SellerHub.stream()` no longer deadlocks when the consumer leaves the stream

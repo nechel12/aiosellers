@@ -8,17 +8,23 @@ import random
 import uuid
 from collections import deque
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import partial
+from math import isfinite
 from typing import TYPE_CHECKING, Any, AsyncIterator, cast
 
 from pydantic import ValidationError
 
+from ..core.exceptions import AuthError
 from ..core.state import StateStore
+from .core.exceptions import Unauthorized
+from .core.utils import has_auth_error
 from .documents import CHAT_MESSAGE_CREATED, CHAT_UPDATED, USER_UPDATED
 from .events import (
     _DEAL_EVENT,
     ChatInitializedEvent,
+    ConnectionStatusEvent,
     NewMessageEvent,
     NewReviewEvent,
     PlayerokEvent,
@@ -39,6 +45,11 @@ _WS_RECONNECT_MAX = 30.0
 _EVENT_BUFFER_SIZE = 256
 _STOP = object()
 _DRIFT_WARNED: set[tuple[str, str]] = set()
+
+
+@dataclass(slots=True)
+class _FeedFailure:
+    error: Exception
 
 
 def _warn_drift(kind: str, exc: ValidationError) -> None:
@@ -185,6 +196,8 @@ class EventListener:
         include_own: bool = False,
         resync_history_batches: int = 3,
         sent_history_limit: int = 500,
+        connection_events: bool = False,
+        state_flush_interval: float = 0.0,
     ) -> None:
         self.client = client
         self.refetch_message_delay = refetch_message_delay
@@ -203,6 +216,10 @@ class EventListener:
         self.include_own = include_own
         self.resync_history_batches = max(1, resync_history_batches)
         self.sent_history_limit = max(1, sent_history_limit)
+        self.connection_events = connection_events
+        if not isfinite(state_flush_interval) or state_flush_interval < 0:
+            raise ValueError("state_flush_interval must be non-negative and finite")
+        self.state_flush_interval = state_flush_interval
 
         self.sent: list[str] = []
         self.processed_message_ids: set[str] = set()
@@ -240,6 +257,7 @@ class EventListener:
         self._state_dirty = False
         self._state_version = 0
         self._state_lock = asyncio.Lock()
+        self._state_flush_task: asyncio.Task[None] | None = None
 
     def _raw(self) -> Any:
         raw = self.client._raw
@@ -327,11 +345,15 @@ class EventListener:
             return []
 
         if frame_type == "connection_error":
-            logger.warning("Playerok rejected the WS connection: %s", data.get("payload"))
+            if has_auth_error(data.get("payload")):
+                raise Unauthorized("PlayerOK rejected WebSocket authentication")
+            logger.warning("PlayerOK rejected the WebSocket connection")
             return []
 
         if frame_type == "error":
-            logger.warning("Playerok subscription error: %s", data.get("payload"))
+            if has_auth_error(data.get("payload")):
+                raise Unauthorized("PlayerOK rejected WebSocket authentication")
+            logger.warning("PlayerOK reported a subscription error")
             return []
 
         if frame_type == "complete":
@@ -413,7 +435,7 @@ class EventListener:
                 unseen = not self._message_seen(message.id)
                 if new_chat or unseen or fresh:
                     events.extend(await self._sync_chat_messages(chat_schema, now))
-            except asyncio.CancelledError:
+            except (asyncio.CancelledError, AuthError):
                 raise
             except Exception:
                 logger.debug("Playerok new-chat poll failed for %s", chat_schema.id, exc_info=True)
@@ -453,7 +475,7 @@ class EventListener:
                     event, partial(self._commit_review_delivery, deal_id, review.id)
                 )
                 events.append(event)
-            except asyncio.CancelledError:
+            except (asyncio.CancelledError, AuthError):
                 raise
             except Exception:
                 logger.debug("Playerok review poll failed for %s", deal_id, exc_info=True)
@@ -617,8 +639,12 @@ class EventListener:
                     await queue.put(event)
             except asyncio.CancelledError:
                 raise
-            except Exception:
-                logger.exception("Event feed task failed")
+            except Exception as exc:
+                await queue.put(_FeedFailure(exc))
+            finally:
+                close = getattr(iterator, "aclose", None)
+                if close is not None:
+                    await close()
 
         try:
             if messages:
@@ -648,6 +674,8 @@ class EventListener:
                 item = await queue.get()
                 if item is _STOP or self._stop.is_set():
                     break
+                if isinstance(item, _FeedFailure):
+                    raise item.error
                 yield item
                 delivery = self._pending_deliveries.pop(id(item), None)
                 if delivery is not None:
@@ -674,6 +702,9 @@ class EventListener:
         self._pending_deal_ids.clear()
         self._pending_review_ids.clear()
         self._pending_review_deals.clear()
+        flush = self._state_flush_task
+        if flush is not None:
+            await asyncio.shield(flush)
         await self._save_state()
         ws = self._ws
         self._ws = None
@@ -683,14 +714,18 @@ class EventListener:
 
     async def _socket_events(self) -> AsyncIterator[PlayerokEvent]:
         import websockets
+        from websockets.exceptions import ConnectionClosed, InvalidStatus
 
         delay = _WS_RECONNECT_INITIAL
+        state = None
         while not self._stop.is_set():
             connected = False
             try:
                 transport = self.client._transport
                 config = getattr(transport, "config", None)
-                proxy = getattr(config, "proxy", None)
+                proxy = getattr(config, "proxy", None) or None
+                if proxy is None and getattr(config, "ws_use_system_proxy", False):
+                    proxy = True
                 ws_url = getattr(config, "ws_url", None) or _WS_URL
                 origin = getattr(config, "origin", None) or "https://playerok.com"
                 connect = websockets.connect(
@@ -698,7 +733,7 @@ class EventListener:
                     subprotocols=[cast(Any, "graphql-transport-ws")],
                     additional_headers=self._headers(),
                     origin=cast(Any, origin),
-                    proxy=proxy or True,
+                    proxy=proxy,
                 )
                 async with connect as ws:
                     self._ws = ws
@@ -731,14 +766,31 @@ class EventListener:
                             raise ConnectionError(f"WebSocket {frame_type}")
                         if frame_type == "connection_ack":
                             connected = True
+                            if self.connection_events and state != "connected":
+                                state = "connected"
+                                yield ConnectionStatusEvent(self.client, "connected")
                             if self._needs_resync:
                                 events.extend(await self._resync())
                                 self._needs_resync = False
                         for event in events:
                             yield event
                         await self._save_state()
-            except asyncio.CancelledError:
+            except (asyncio.CancelledError, AuthError):
                 raise
+            except InvalidStatus as exc:
+                if exc.response.status_code == 401:
+                    raise Unauthorized(
+                        "PlayerOK rejected the WebSocket handshake (HTTP 401)"
+                    ) from exc
+                logger.debug("WebSocket handshake failed", exc_info=True)
+            except ConnectionClosed as exc:
+                received = exc.rcvd
+                if received is not None and (
+                    (received.code == 4401 and not connected)
+                    or (received.code in {4401, 4403} and has_auth_error(received.reason))
+                ):
+                    raise Unauthorized("PlayerOK rejected WebSocket authentication") from exc
+                logger.debug("WebSocket connection closed", exc_info=True)
             except Exception:
                 logger.debug("WebSocket connection dropped", exc_info=True)
             finally:
@@ -746,6 +798,9 @@ class EventListener:
 
             if self._stop.is_set():
                 break
+            if self.connection_events and state != "reconnecting":
+                state = "reconnecting"
+                yield ConnectionStatusEvent(self.client, "reconnecting")
             if connected:
                 self._needs_resync = True
                 delay = _WS_RECONNECT_INITIAL
@@ -758,6 +813,8 @@ class EventListener:
             page = await self._raw().chats.get_chats(
                 user_id=self._me_id(), count=24, type=self._pm_type()
             )
+        except AuthError:
+            raise
         except Exception:
             logger.warning("Playerok resync after reconnect failed", exc_info=True)
             return []
@@ -775,7 +832,7 @@ class EventListener:
                     await self._send(self._chat_message_frame(chat_schema.id))
                     events.append(ChatInitializedEvent(client=self.client, chat=chat))
                 events.extend(await self._sync_chat_messages(chat_schema, now))
-            except asyncio.CancelledError:
+            except (asyncio.CancelledError, AuthError):
                 raise
             except Exception:
                 logger.debug("Playerok resync failed for chat %s", chat_schema.id, exc_info=True)
@@ -795,7 +852,7 @@ class EventListener:
                 for event in await self.poll_new_chats_once(persist=False):
                     yield event
                 await self._save_state()
-            except asyncio.CancelledError:
+            except (asyncio.CancelledError, AuthError):
                 raise
             except Exception:
                 logger.debug("New chat poll failed", exc_info=True)
@@ -819,7 +876,7 @@ class EventListener:
                 last_refresh = now
                 try:
                     await self._refresh_known_deals()
-                except asyncio.CancelledError:
+                except (asyncio.CancelledError, AuthError):
                     raise
                 except Exception:
                     logger.debug("Deal refresh for review polling failed", exc_info=True)
@@ -827,7 +884,7 @@ class EventListener:
                 for event in await self.poll_reviews_once(persist=False):
                     yield event
                 await self._save_state()
-            except asyncio.CancelledError:
+            except (asyncio.CancelledError, AuthError):
                 raise
             except Exception:
                 logger.debug("Review poll failed", exc_info=True)
@@ -957,6 +1014,8 @@ class EventListener:
                 continue
             try:
                 events.extend(await self.events_for_message(chat, message, persist=False))
+            except AuthError:
+                raise
             except Exception:
                 logger.debug("Playerok resync failed for message %s", message.id, exc_info=True)
         return events
@@ -1015,6 +1074,8 @@ class EventListener:
         for _ in range(self.refetch_attempts):
             try:
                 deal = await self._raw().deals.get_deal(deal_id)
+            except AuthError:
+                raise
             except Exception:
                 deal = None
             if deal is not None:
@@ -1205,25 +1266,49 @@ class EventListener:
         }
 
     async def _save_state(self) -> None:
+        if self.state is None or not self._state_loaded or not self._state_dirty:
+            return
+        if self.state_flush_interval and self._queue is not None and not self._stop.is_set():
+            if self._state_flush_task is None:
+                self._state_flush_task = asyncio.create_task(self._flush_state_later())
+            return
+        await self._write_state()
+
+    async def _flush_state_later(self) -> None:
+        try:
+            try:
+                await asyncio.wait_for(self._stop.wait(), timeout=self.state_flush_interval)
+            except TimeoutError:
+                saved = await self._write_state()
+            else:
+                return
+        finally:
+            self._state_flush_task = None
+        if saved and self._state_dirty and not self._stop.is_set():
+            # More events were acknowledged while the previous write was in flight.
+            await self._save_state()
+
+    async def _write_state(self) -> bool:
         if (
             self.state is None
             or not self._state_loaded
             or not self._state_dirty
             or self._state_key is None
         ):
-            return
+            return False
         async with self._state_lock:
             if not self._state_loaded or not self._state_dirty:
-                return
+                return False
             version = self._state_version
             snapshot = self._snapshot()
             try:
                 await self.state.set(self._state_key, snapshot)
             except Exception as exc:
                 logger.warning("Playerok state save failed: %s", exc)
-                return
+                return False
             if version == self._state_version:
                 self._state_dirty = False
+            return True
 
     def _subscribe(
         self, operation: str, query: str, variables: dict[str, Any], *, sub_id: str | None = None

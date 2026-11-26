@@ -1,8 +1,15 @@
+import asyncio
 import unittest
+from contextlib import asynccontextmanager
 from unittest import mock
 
+import httpx
+
+from aiosellers import AuthError, TransientError
 from aiosellers.playerok.core.config import PlayerokConfig
 from aiosellers.playerok.core.exceptions import (
+    CloudflareDetected,
+    DownloadTooLargeError,
     RateLimitedError,
     RequestFailedError,
 )
@@ -16,11 +23,14 @@ class _Response:
         self.status_code = status_code
         self.text = text
         self.content = content
-        self.headers = headers or {}
+        self.headers = httpx.Headers(headers or {})
         self.payload = payload
 
     def json(self):
         return self.payload
+
+    async def aiter_raw(self):
+        yield self.content
 
 
 class _FakeClient:
@@ -36,6 +46,11 @@ class _FakeClient:
     async def post(self, url=None, **kwargs):
         self.calls.append(("post", url, kwargs))
         return self._next()
+
+    @asynccontextmanager
+    async def stream(self, method, url):
+        self.calls.append((method, url, {}))
+        yield self._next()
 
     def _next(self):
         if not self.responses:
@@ -68,11 +83,14 @@ class TransportTestBase(unittest.IsolatedAsyncioTestCase):
 
         def factory(**kwargs):
             self.created.append(kwargs)
-            return self.session if len(self.created) == 1 else self.download
+            return self.session
 
-        patcher = mock.patch("tls_requests.AsyncClient", side_effect=factory)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        def download_factory(**kwargs):
+            self.created.append(kwargs)
+            return self.download
+
+        self.enterContext(mock.patch("tls_requests.AsyncClient", side_effect=factory))
+        self.enterContext(mock.patch("httpx.AsyncClient", side_effect=download_factory))
         transport = PlayerokTransport(
             access_token="token",
             config=PlayerokConfig(base_url=base_url, proxy=proxy),
@@ -123,8 +141,10 @@ class RequestTests(TransportTestBase):
         self.assertEqual(len(self.session.calls), 1)
 
         transport = self.make_transport([_Response(429, headers={"retry-after": "5"})])
-        with self.assertRaises(RateLimitedError):
+        with self.assertRaises(RateLimitedError) as caught:
             await transport.request("post", "/graphql", {"query": "x"})
+        self.assertIsInstance(caught.exception, TransientError)
+        self.assertEqual(caught.exception.retry_after, 5)
         self.assertEqual(len(self.session.calls), 1)
 
     async def test_client_error_is_raised_immediately(self):
@@ -132,6 +152,22 @@ class RequestTests(TransportTestBase):
         with self.assertRaises(RequestFailedError):
             await transport.request("get", "/graphql")
         self.assertEqual(len(self.session.calls), 1)
+
+    async def test_explicit_auth_rejection_stops_retries(self):
+        for response in (
+            _Response(401),
+            _Response(403, text='{"errors":[{"extensions":{"code":"UNAUTHENTICATED"}}]}'),
+        ):
+            with self.subTest(status=response.status_code):
+                transport = self.make_transport([response])
+                with self.assertRaises(AuthError):
+                    await transport.request("get", "/graphql")
+                self.assertEqual(len(self.session.calls), 1)
+
+    async def test_cloudflare_header_is_not_an_auth_error(self):
+        transport = self.make_transport([_Response(403, headers={"cf-mitigated": "challenge"})])
+        with self.assertRaises(CloudflareDetected):
+            await transport.request("get", "/graphql")
 
     async def test_get_retries_network_errors(self):
         transport = self.make_transport([ConnectionError("boom"), _Response(200)])
@@ -189,6 +225,7 @@ class DownloadTests(TransportTestBase):
         self.assertEqual(self.session.calls, [])
         self.assertEqual(len(self.download.calls), 1)
         self.assertNotIn("cookies", self.created[1])
+        self.assertFalse(self.created[1]["trust_env"])
 
     async def test_download_rejects_untrusted_host(self):
         transport = self.make_transport(download_responses=[_Response(200)])
@@ -238,8 +275,7 @@ class DownloadTests(TransportTestBase):
             [call[1] for call in self.download.calls],
             ["https://playerok.com/pic.png", "https://playerok.com/next.png"],
         )
-        for call in self.download.calls:
-            self.assertFalse(call[2]["follow_redirects"])
+        self.assertFalse(self.created[1]["follow_redirects"])
 
     async def test_download_rejects_untrusted_redirect_target(self):
         transport = self.make_transport(
@@ -298,3 +334,48 @@ class DownloadTests(TransportTestBase):
         await transport.close()
         self.assertTrue(self.session.closed)
         self.assertTrue(self.download.closed)
+
+    async def test_announced_oversize_is_rejected_without_reading(self):
+        response = _Response(headers=httpx.Headers({"Content-Length": "9"}))
+        response.aiter_raw = mock.Mock(side_effect=AssertionError("must not read body"))
+        transport = self.make_transport(download_responses=[response])
+        with self.assertRaises(DownloadTooLargeError):
+            await transport.download("/pic.png", max_bytes=8)
+        self.assertEqual(len(self.download.calls), 1)
+
+    async def test_streaming_limit_stops_an_unannounced_body_and_closes_it(self):
+        client_cls = httpx.AsyncClient
+        transport = self.make_transport()
+        consumed = []
+        closed = []
+
+        class Body(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                for chunk in (b"123", b"456", b"unread"):
+                    consumed.append(chunk)
+                    yield chunk
+
+            async def aclose(self):
+                closed.append(True)
+
+        async def respond(request):
+            self.assertNotIn("cookie", request.headers)
+            return httpx.Response(200, stream=Body())
+
+        download_client = client_cls(transport=httpx.MockTransport(respond), trust_env=False)
+        transport._download_client = download_client
+        try:
+            with self.assertRaises(DownloadTooLargeError):
+                await transport.download("/pic.png", max_bytes=5)
+            self.assertEqual(consumed, [b"123", b"456"])
+            self.assertEqual(closed, [True])
+        finally:
+            await transport.close()
+
+    async def test_deadline_covers_retries(self):
+        transport = self.make_transport(
+            download_responses=[_Response(429, headers={"retry-after": "30"})]
+        )
+        with self.assertRaises(TimeoutError):
+            await asyncio.wait_for(transport.download("/pic.png", timeout=0.01), 1)
+        self.assertEqual(len(self.download.calls), 1)

@@ -11,7 +11,9 @@ from urllib.parse import urlencode, urlparse
 
 from bs4 import BeautifulSoup
 
+from ...core.retry import retry_after_seconds
 from ..core.config import FunPayConfig
+from ..core.exceptions import TransientRequestError
 from ..exceptions import RateLimitedError, RequestFailedError, UnauthorizedError
 from ..parsers.home import parse_home
 
@@ -153,6 +155,10 @@ class FunPayTransport:
                         or attempt + 1 >= _REQUEST_ATTEMPTS
                     ):
                         raise
+                    last_error = exc
+                except (ConnectionError, TimeoutError) as exc:
+                    if attempt + 1 >= _REQUEST_ATTEMPTS:
+                        raise TransientRequestError(f"GET {path} failed") from exc
                     last_error = exc
                 except Exception as exc:
                     if attempt + 1 >= _REQUEST_ATTEMPTS:
@@ -326,18 +332,21 @@ class FunPayTransport:
     def _raise_for_status(self, response: Any, *, raise_not_200: bool) -> None:
         code = getattr(response, "status_code", None)
         text = response_text(response)
-        if code == 403 or _is_login(response):
+        if code in (401, 403) or _is_login(response):
             raise UnauthorizedError("unauthorized", status_code=code, body=text)
         if code == 429:
-            retry_after = _header_text(getattr(response, "headers", None), "retry-after")
-            try:
-                delay = max(1.0, float(retry_after))
-            except (TypeError, ValueError):
-                delay = 60.0
+            retry_after = retry_after_seconds(
+                _header_text(getattr(response, "headers", None), "retry-after")
+                or _header_text(getattr(response, "headers", None), "Retry-After")
+            )
+            delay = 60.0 if retry_after is None else max(1.0, retry_after)
             self.rate_limited_until = time.monotonic() + min(300.0, delay)
-            raise RateLimitedError("rate limited", status_code=code, body=text)
+            raise RateLimitedError(
+                "rate limited", status_code=code, body=text, retry_after=retry_after
+            )
         if raise_not_200 and code not in (None, 200):
-            raise RequestFailedError(f"HTTP {code}", status_code=code, body=text)
+            error = TransientRequestError if code in _RETRYABLE_STATUSES else RequestFailedError
+            raise error(f"HTTP {code}", status_code=code, body=text)
 
 
 def _ends_login(value: str) -> bool:

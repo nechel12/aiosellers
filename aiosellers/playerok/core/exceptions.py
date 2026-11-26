@@ -1,20 +1,32 @@
-class CloudflareDetected(Exception):
+from ...core.exceptions import AiosellersError, AuthError, TransientError
+from ...core.exceptions import RateLimitedError as CommonRateLimitedError
+
+
+class CloudflareDetected(AiosellersError):
     pass
 
 
-class RequestFailedError(Exception):
+class RequestFailedError(AiosellersError):
     pass
 
 
-class RateLimitedError(RequestFailedError):
+class RateLimitedError(CommonRateLimitedError, RequestFailedError):
     pass
 
 
-class Unauthorized(Exception):
+class TransientRequestError(TransientError, RequestFailedError):
     pass
 
 
-class GraphQLError(Exception):
+class Unauthorized(AuthError):
+    pass
+
+
+class DownloadTooLargeError(RequestFailedError):
+    """The attachment exceeded the configured byte limit."""
+
+
+class GraphQLError(AiosellersError):
     pass
 
 

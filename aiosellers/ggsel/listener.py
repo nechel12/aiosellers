@@ -5,10 +5,11 @@ import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, AsyncIterator
+from typing import TYPE_CHECKING, Any, AsyncGenerator
 
 from pydantic import ValidationError
 
+from ..core.polling import PollControl
 from ..core.state import StateStore
 from .core.exceptions import RateLimitedError, RequestFailedError, UnauthorizedError
 from .entities.chat import Chat
@@ -74,6 +75,7 @@ class EventListener:
         self.review_page_limit = max(1, review_page_limit)
         self.state_limit = max(1, state_limit)
         self.include_own = include_own
+        self.control = PollControl()
 
         self._chats: dict[int, _ChatState] = {}
         self._chats_ready = False
@@ -95,17 +97,23 @@ class EventListener:
         sales: bool = True,
         reviews: bool = True,
         interval: float | None = None,
-    ) -> AsyncIterator[Any]:
+    ) -> AsyncGenerator[Any, None]:
         pause = max(0.1, self.client._config.poll_interval if interval is None else interval)
-        while True:
+        while not self.control.stopped:
             started = time.monotonic()
-            events = await self.tick(messages=messages, sales=sales, reviews=reviews, persist=False)
+            events = await self.control.poll(
+                self.tick(messages=messages, sales=sales, reviews=reviews, persist=False)
+            )
             for event in events:
+                if self.control.stopped:
+                    return
                 yield event
+            if self.control.stopped:
+                return
             await self._save_state()
             remain = pause - (time.monotonic() - started)
             if remain > 0:
-                await asyncio.sleep(remain)
+                await self.control.wait(remain)
 
     async def tick(
         self,

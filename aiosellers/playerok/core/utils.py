@@ -10,7 +10,7 @@ from typing import Any
 from urllib.parse import urljoin, urlparse
 
 from ...core.media_policy import open_media
-from .exceptions import GraphQLError, PersistedQueryExpired
+from .exceptions import GraphQLError, PersistedQueryExpired, Unauthorized
 from .types import ImageInput
 
 MAX_IMAGE_DOWNLOAD_BYTES = 10 * 1024 * 1024
@@ -26,10 +26,31 @@ def _dig(obj: dict[str, Any], path: Iterable[str]) -> Any:
     return cur
 
 
+def has_auth_error(errors: Any) -> bool:
+    """Match explicit auth signals, not generic permission or network errors."""
+    if isinstance(errors, (list, tuple)):
+        return any(has_auth_error(error) for error in errors)
+    if isinstance(errors, dict):
+        extensions = errors.get("extensions")
+        code = extensions.get("code") if isinstance(extensions, dict) else errors.get("code")
+        if isinstance(code, str) and code.upper() in {"UNAUTHENTICATED", "UNAUTHORIZED"}:
+            return True
+        return has_auth_error(errors.get("message")) or has_auth_error(errors.get("errors"))
+    return isinstance(errors, str) and errors.strip().lower().rstrip(".") in {
+        "unauthenticated",
+        "unauthorized",
+        "not authenticated",
+        "invalid token",
+        "token expired",
+    }
+
+
 def _raise_on_gql_errors(payload: dict[str, Any]) -> None:
     errors = payload.get("errors")
     if not errors:
         return
+    if has_auth_error(errors):
+        raise Unauthorized("PlayerOK rejected the authenticated session (GraphQL)")
     first = errors[0]
     message = first.get("message") if isinstance(first, dict) else str(first)
     code = ""

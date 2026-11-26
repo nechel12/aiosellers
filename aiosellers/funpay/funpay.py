@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from contextlib import aclosing
 from dataclasses import dataclass, fields
 from typing import Any, cast
 
@@ -66,6 +67,7 @@ class FunPay:
         self._transport: FunPayTransport | None = None
         self._raw: RawAPI | None = None
         self._listener: EventListener | None = None
+        self._listeners: set[EventListener] = set()
         self._use_identity_map = config.use_identity_map
         self._account_id: int | None = None
         self._polling_task: asyncio.Task | None = None
@@ -146,10 +148,17 @@ class FunPay:
     async def close(self) -> None:
         async with self._lifecycle_lock:
             transport = self._transport
+            listeners = set(self._listeners)
+            if self._listener is not None:
+                listeners.add(self._listener)
+            for listener in listeners:
+                listener.control.stop()
+            self._listeners.clear()
             self._transport = None
             self._raw = None
             self._account_id = None
             self._listener = None
+            await asyncio.gather(*(listener.control.aclose() for listener in listeners))
             if self._use_identity_map:
                 self._identity_maps.users.clear()
                 self._identity_maps.chats.clear()
@@ -168,17 +177,35 @@ class FunPay:
         reviews: bool = True,
         interval: float | None = None,
         **listener_options: Any,
-    ):
-        if self._transport is None:
+    ) -> AsyncGenerator[FunPayEvent, None]:
+        transport = self._transport
+        if transport is None:
             raise RuntimeError("Client is not started. Call start() or start_polling() first.")
         listener_options.setdefault("state", self._config.state)
-        return EventListener(self, **listener_options).listen(
-            messages=messages,
-            orders=orders,
-            purchases=purchases,
-            reviews=reviews,
-            interval=interval,
-        )
+
+        async def read() -> AsyncGenerator[FunPayEvent, None]:
+            if self._transport is not transport:
+                return
+            listener = EventListener(self, **listener_options)
+            self._listeners.add(listener)
+            try:
+                async with aclosing(
+                    listener.listen(
+                        messages=messages,
+                        orders=orders,
+                        purchases=purchases,
+                        reviews=reviews,
+                        interval=interval,
+                    )
+                ) as source:
+                    async for event in source:
+                        yield event
+            finally:
+                self._listeners.discard(listener)
+                if self._listener is listener:
+                    self._listener = next(iter(self._listeners), None)
+
+        return read()
 
     async def start_polling(
         self,

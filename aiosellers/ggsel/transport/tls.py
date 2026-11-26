@@ -7,11 +7,14 @@ import random
 import time
 from typing import Any, Literal
 
+from ...core.exceptions import ConfigurationError
+from ...core.retry import retry_after_seconds
 from ..core.config import GGselConfig
 from ..core.exceptions import (
     ApiError,
     RateLimitedError,
     RequestFailedError,
+    TransientRequestError,
     UnauthorizedError,
 )
 from ..schemas import LoginResponse
@@ -25,12 +28,7 @@ def _retry_after(headers: Any) -> float | None:
     if headers is None:
         return None
     value = headers.get("retry-after") or headers.get("Retry-After")
-    if value is None:
-        return None
-    try:
-        return max(0.0, float(value))
-    except (TypeError, ValueError):
-        return None
+    return retry_after_seconds(str(value) if value is not None else None)
 
 
 def _backoff(attempt: int, retry_after: float | None = None) -> float:
@@ -56,18 +54,24 @@ class GGselTransport:
 
         key = api_key or os.getenv("GGSEL_API_KEY")
         if not key:
-            raise RuntimeError(
+            raise ConfigurationError(
                 "Please provide a GGsel API key or set the GGSEL_API_KEY environment variable."
             )
         raw_seller_id = seller_id if seller_id is not None else os.getenv("GGSEL_SELLER_ID")
+        if raw_seller_id is not None and type(raw_seller_id) not in (int, str):
+            raise ConfigurationError("Invalid GGsel seller id; expected a positive integer.")
         try:
             parsed_seller_id = int(raw_seller_id) if raw_seller_id not in (None, "") else None
         except (TypeError, ValueError) as exc:
-            raise RuntimeError(f"Invalid GGsel seller id: {raw_seller_id!r}") from exc
+            raise ConfigurationError(
+                "Invalid GGsel seller id; expected a positive integer."
+            ) from exc
         if parsed_seller_id is None:
-            raise RuntimeError(
+            raise ConfigurationError(
                 "Please provide a GGsel seller id or set the GGSEL_SELLER_ID environment variable."
             )
+        if parsed_seller_id <= 0:
+            raise ConfigurationError("Invalid GGsel seller id; expected a positive integer.")
 
         self._api_key = key
         self._seller_id = parsed_seller_id
@@ -223,7 +227,9 @@ class GGselTransport:
             if status == 401:
                 raise UnauthorizedError(f"GGsel rejected the access token: HTTP 401 ({path})")
             if status == 429:
-                last_error = RateLimitedError(f"GGsel rate limited the request: HTTP 429 ({path})")
+                last_error = RateLimitedError(
+                    f"GGsel rate limited the request: HTTP 429 ({path})", retry_after=retry_after
+                )
                 if attempt + 1 >= attempts:
                     raise last_error
                 await asyncio.sleep(_backoff(attempt, retry_after))
@@ -232,9 +238,15 @@ class GGselTransport:
                 last_error = RequestFailedError(f"GGsel request failed: HTTP {status} ({path})")
                 await asyncio.sleep(_backoff(attempt, retry_after))
                 continue
-            raise RequestFailedError(f"GGsel request failed: HTTP {status} ({path})")
+            error = TransientRequestError if status in {500, 502, 503, 504} else RequestFailedError
+            raise error(f"GGsel request failed: HTTP {status} ({path})")
 
-        raise RequestFailedError(f"GGsel request failed: {path}: {last_error}") from last_error
+        error = (
+            TransientRequestError
+            if isinstance(last_error, (ConnectionError, TimeoutError))
+            else RequestFailedError
+        )
+        raise error(f"GGsel request failed: {path}: {last_error}") from last_error
 
     async def _exchange(
         self,

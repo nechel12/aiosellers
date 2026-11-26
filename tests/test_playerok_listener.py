@@ -1,17 +1,22 @@
 import asyncio
 import json
 import unittest
+from contextlib import aclosing
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest import mock
 
 from websockets.client import ClientProtocol
+from websockets.exceptions import ConnectionClosedError
+from websockets.frames import Close
 from websockets.server import ServerProtocol
 from websockets.uri import parse_uri
 
+from aiosellers import AuthError, MemoryStateStore, SellerHub
 from aiosellers.playerok.api.chats import ChatAPI
 from aiosellers.playerok.api.deals import DealAPI
 from aiosellers.playerok.core.config import PlayerokConfig
+from aiosellers.playerok.core.exceptions import Unauthorized
 from aiosellers.playerok.events import ChatInitializedEvent, NewMessageEvent, NewReviewEvent
 from aiosellers.playerok.listener import EventListener
 from aiosellers.playerok.schemas import Chat as ChatSchema
@@ -213,6 +218,21 @@ class SocketLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(connect.call_args.kwargs["proxy"], proxy)
 
+    async def test_system_proxy_is_opt_in(self):
+        for enable in (False, True):
+            listener = EventListener(_Client())
+            listener.client._transport = SimpleNamespace(
+                _access_token="token",
+                config=PlayerokConfig(ws_use_system_proxy=enable),
+            )
+            socket = _Socket(listener, stop_on_enter=True)
+            with (
+                self.subTest(enable=enable),
+                mock.patch("websockets.connect", return_value=socket) as connect,
+            ):
+                await asyncio.wait_for(self._drain(listener), 1)
+                self.assertIs(connect.call_args.kwargs["proxy"], True if enable else None)
+
     async def test_custom_origin_and_port_produce_a_valid_handshake(self):
         listener = EventListener(_Client())
         listener.client._transport = SimpleNamespace(
@@ -259,6 +279,89 @@ class SocketLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(connect.call_count, 2)
         sleep.assert_awaited_once()
+
+    async def test_ws_auth_error_reaches_the_hub_without_reconnect(self):
+        client = _Client()
+        listener = EventListener(client)
+        socket = _Socket(
+            listener,
+            [
+                {
+                    "type": "connection_error",
+                    "payload": {"errors": [{"extensions": {"code": "UNAUTHENTICATED"}}]},
+                }
+            ],
+        )
+        client.listen = listener.listen
+        hub = SellerHub()
+        hub.add(client, platform="playerok", listen_options={"reviews": False})
+        with mock.patch("websockets.connect", return_value=socket) as connect:
+            async with aclosing(hub.stream(error_policy="raise")) as stream:
+                with self.assertRaises(AuthError):
+                    await asyncio.wait_for(anext(stream), 1)
+        connect.assert_called_once()
+        self.assertEqual(listener._tasks, [])
+
+    async def test_state_batching_flushes_at_idle_and_on_close(self):
+        class Store(MemoryStateStore):
+            def __init__(self):
+                super().__init__()
+                self.writes = []
+                self.written = asyncio.Event()
+
+            async def set(self, key, value):
+                self.writes.append(value["messages"])
+                await super().set(key, value)
+                self.written.set()
+
+        store = Store()
+        listener = EventListener(_Client(), state=store, state_flush_interval=0.025)
+        listener._queue = asyncio.Queue()
+        listener._state_key = "fixture"
+        listener._state_loaded = True
+        try:
+            for message in ("first", "second"):
+                listener._mark_message(message)
+                await listener._save_state()
+            self.assertEqual(store.writes, [])
+            await asyncio.wait_for(store.written.wait(), timeout=1)
+            self.assertEqual(store.writes, [["first", "second"]])
+
+            listener._mark_message("third")
+            await listener._save_state()
+        finally:
+            await listener.aclose()
+        self.assertEqual(store.writes, [["first", "second"], ["first", "second", "third"]])
+        self.assertIsNone(listener._state_flush_task)
+
+    async def test_ws_unauthorized_close_before_ack_is_fatal(self):
+        listener = EventListener(_Client())
+        socket = _Socket(listener)
+        socket.recv = mock.AsyncMock(side_effect=ConnectionClosedError(Close(4401, ""), None))
+        with mock.patch("websockets.connect", return_value=socket) as connect:
+            with self.assertRaises(AuthError):
+                await asyncio.wait_for(self._drain(listener), 1)
+        connect.assert_called_once()
+
+    async def test_status_events_distinguish_temporary_failure_from_auth_error(self):
+        listener = EventListener(_Client(), connection_events=True)
+        first = _Socket(listener, [{"type": "connection_error", "payload": {}}])
+        second = _Socket(listener, [{"type": "connection_ack"}], stop_after_frames=True)
+        with (
+            mock.patch("websockets.connect", side_effect=[first, second]),
+            mock.patch("aiosellers.playerok.listener.asyncio.sleep", new_callable=mock.AsyncMock),
+        ):
+            states = [event.state async for event in listener._socket_events()]
+        self.assertEqual(states, ["reconnecting", "connected"])
+
+    async def test_review_poller_forwards_auth_failure(self):
+        client = _Client()
+        client._raw.deals.get_deals = mock.AsyncMock(side_effect=Unauthorized("expired"))
+        listener = EventListener(client)
+        async with aclosing(listener.listen(messages=False, reviews=True)) as events:
+            with self.assertRaises(AuthError):
+                await asyncio.wait_for(anext(events), 1)
+        self.assertEqual(listener._tasks, [])
 
     async def test_subscription_error_reconnects_and_resubscribes(self):
         listener = EventListener(_Client())

@@ -101,6 +101,7 @@ class GameCategoryDataFieldTypes(OpenStrEnum):
 
 
 class EventTypes(OpenStrEnum):
+    CONNECTION_STATUS = "CONNECTION_STATUS"
     CHAT_INITIALIZED = "CHAT_INITIALIZED"
     NEW_MESSAGE = "NEW_MESSAGE"
     NEW_DEAL = "NEW_DEAL"

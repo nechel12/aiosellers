@@ -4,6 +4,7 @@ import os
 from dataclasses import dataclass
 from typing import Literal
 
+from ...core.exceptions import ConfigurationError
 from .constants import DEFAULT_USER_AGENT
 
 
@@ -23,7 +24,7 @@ class FunPayConfig:
     def from_client(cls, config) -> FunPayConfig:
         key = config.golden_key or os.getenv("FUNPAY_GOLDEN_KEY")
         if not key:
-            raise RuntimeError(
+            raise ConfigurationError(
                 "Please provide funpay golden_key or fill FUNPAY_GOLDEN_KEY environment variable."
             )
         user_agent = (config.user_agent or "").strip() or DEFAULT_USER_AGENT

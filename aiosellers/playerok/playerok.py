@@ -20,7 +20,7 @@ from .events import PlayerokEvent
 from .listener import EventListener
 from .raw import RawAPI
 from .schemas import EventTypes
-from .transport import PlayerokTransport
+from .transport import DEFAULT_DOWNLOAD_MAX_BYTES, PlayerokTransport
 
 logger = logging.getLogger("aiosellers.playerok")
 
@@ -129,6 +129,7 @@ class Playerok:
                     base_url=self._config.base_url,
                     proxy=self._config.proxy,
                     ws_url=self._config.ws_url,
+                    ws_use_system_proxy=self._config.ws_use_system_proxy,
                 ),
             )
             raw = RawAPI(transport)
@@ -163,10 +164,16 @@ class Playerok:
                 self._identity_maps.games.clear()
                 self._identity_maps.items.clear()
 
-    async def download(self, url: str) -> bytes:
+    async def download(
+        self,
+        url: str,
+        *,
+        max_bytes: int = DEFAULT_DOWNLOAD_MAX_BYTES,
+        timeout: float | None = None,
+    ) -> bytes:
         if self._transport is None:
             raise RuntimeError("Client is not started. Call start() or start_polling() first.")
-        return await self._transport.download(url)
+        return await self._transport.download(url, max_bytes=max_bytes, timeout=timeout)
 
     def listen(self, *, messages: bool = True, reviews: bool = True, **listener_options: Any):
         """Low-level event stream. The client must already be started."""

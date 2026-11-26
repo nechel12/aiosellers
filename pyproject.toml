@@ -37,6 +37,7 @@ classifiers = [
 ]
 dependencies = [
     "beautifulsoup4>=4.12",
+    "httpx[socks]>=0.28.1",
     # Not imported directly; kept as a dependency floor for the TLS stack.
     # 3.15 fixes PYSEC-2026-215.
     "idna>=3.15",

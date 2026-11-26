@@ -1,4 +1,8 @@
-class GGselError(Exception):
+from ...core.exceptions import AiosellersError, AuthError, TransientError
+from ...core.exceptions import RateLimitedError as CommonRateLimitedError
+
+
+class GGselError(AiosellersError):
     pass
 
 
@@ -6,11 +10,15 @@ class RequestFailedError(GGselError):
     pass
 
 
-class RateLimitedError(RequestFailedError):
+class RateLimitedError(CommonRateLimitedError, RequestFailedError):
     pass
 
 
-class UnauthorizedError(GGselError):
+class TransientRequestError(TransientError, RequestFailedError):
+    pass
+
+
+class UnauthorizedError(AuthError, GGselError):
     pass
 
 

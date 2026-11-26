@@ -1,34 +1,40 @@
 import asyncio
+import json
 import os
 import random
+from math import isfinite
 from typing import Any, Literal
 from urllib.parse import urljoin, urlparse
 
+import httpx
+
+from ...core.exceptions import ConfigurationError
+from ...core.retry import retry_after_seconds
 from ..core.config import PlayerokConfig
 from ..core.constants import CLOUDFLARE_SIGNATURES
 from ..core.exceptions import (
     CloudflareDetected,
+    DownloadTooLargeError,
     GraphQLError,
     RateLimitedError,
     RequestFailedError,
+    TransientRequestError,
+    Unauthorized,
 )
+from ..core.utils import has_auth_error
 
 DOWNLOAD_HOSTS_ENV = "PLAYEROK_DOWNLOAD_HOSTS"
 REQUEST_ATTEMPTS = 3
 DOWNLOAD_ATTEMPTS = 3
 DOWNLOAD_REDIRECT_LIMIT = 3
+DEFAULT_DOWNLOAD_MAX_BYTES = 16 * 1024 * 1024
 
 
 def _retry_after(headers: Any) -> float | None:
     if headers is None:
         return None
     value = headers.get("retry-after") or headers.get("Retry-After")
-    if value is None:
-        return None
-    try:
-        return max(0.0, float(value))
-    except (TypeError, ValueError):
-        return None
+    return retry_after_seconds(str(value) if value is not None else None)
 
 
 def _backoff(attempt: int, retry_after: float | None = None) -> float:
@@ -64,7 +70,7 @@ class PlayerokTransport:
         self._config = config or PlayerokConfig()
 
         if not self._access_token:
-            raise RuntimeError(
+            raise ConfigurationError(
                 "Please provide playerok access token or fill PLAYEROK_ACCESS_TOKEN environment variable."
             )
 
@@ -76,7 +82,7 @@ class PlayerokTransport:
         if self._config.proxy:
             client_kwargs["proxy"] = self._config.proxy
         self._client = AsyncClient(**client_kwargs)
-        self._download_client: Any | None = None
+        self._download_client: httpx.AsyncClient | None = None
         self._download_hosts = self._build_download_hosts(self._config.base_url)
 
     @property
@@ -111,19 +117,17 @@ class PlayerokTransport:
             )
         return url
 
-    def _get_download_client(self) -> Any:
+    def _get_download_client(self) -> httpx.AsyncClient:
         # Downloads must not carry the access token cookie, so they use a separate
         # unauthenticated client instead of the session client.
         if self._download_client is None:
-            from tls_requests import AsyncClient  # type: ignore
-
-            client_kwargs: dict[str, Any] = {
-                "headers": {"user-agent": self._config.user_agent},
-                "timeout": self._config.request_timeout,
-            }
-            if self._config.proxy:
-                client_kwargs["proxy"] = self._config.proxy
-            self._download_client = AsyncClient(**client_kwargs)
+            self._download_client = httpx.AsyncClient(
+                headers={"User-Agent": self._config.user_agent, "Accept-Encoding": "identity"},
+                timeout=self._config.request_timeout,
+                proxy=self._config.proxy or None,
+                trust_env=False,
+                follow_redirects=False,
+            )
         return self._download_client
 
     @staticmethod
@@ -137,6 +141,11 @@ class PlayerokTransport:
         content_type = ""
         if headers is not None and hasattr(headers, "get"):
             content_type = str(headers.get("content-type") or "").lower()
+            if (
+                str(headers.get("cf-mitigated") or headers.get("Cf-Mitigated")).lower()
+                == "challenge"
+            ):
+                raise CloudflareDetected("PlayerOK returned a Cloudflare challenge")
         is_html = content_type.startswith("text/html") or text.lstrip().startswith("<")
         if (status >= 400 or is_html) and any(sig in text for sig in CLOUDFLARE_SIGNATURES):
             raise CloudflareDetected("The cloudflare protection is detected.")
@@ -200,6 +209,15 @@ class PlayerokTransport:
             self._raise_if_cloudflare(response)
 
             status = getattr(response, "status_code", 200)
+            if status == 401:
+                raise Unauthorized("PlayerOK rejected the session (HTTP 401)")
+            if status == 403:
+                try:
+                    data = json.loads(_response_body(response))
+                except ValueError:
+                    data = None
+                if has_auth_error(data):
+                    raise Unauthorized("PlayerOK rejected the session (HTTP 403)")
             if status < 400:
                 body = _response_body(response)
                 if body and not body.lstrip().startswith(("{", "[")):
@@ -213,7 +231,8 @@ class PlayerokTransport:
             suffix = _body_suffix(response)
             if status == 429:
                 last_error = RateLimitedError(
-                    f"Playerok rate limited the request: HTTP 429 ({url}){suffix}"
+                    f"Playerok rate limited the request: HTTP 429 ({url}){suffix}",
+                    retry_after=retry_after,
                 )
                 if attempt + 1 >= attempts:
                     raise last_error
@@ -227,74 +246,109 @@ class PlayerokTransport:
                 await asyncio.sleep(_backoff(attempt, retry_after))
                 continue
 
-            raise RequestFailedError(f"Playerok request failed: HTTP {status} ({url}){suffix}")
+            error = TransientRequestError if status in {500, 502, 503, 504} else RequestFailedError
+            raise error(f"Playerok request failed: HTTP {status} ({url}){suffix}")
 
-        raise RequestFailedError(f"Playerok request failed: {url}: {last_error}") from last_error
+        error = (
+            TransientRequestError
+            if isinstance(last_error, (ConnectionError, TimeoutError))
+            else RequestFailedError
+        )
+        raise error(f"Playerok request failed: {url}: {last_error}") from last_error
 
-    async def _get_download_response(self, client: Any, url: str) -> tuple[Any, str]:
+    async def _download_once(
+        self, client: httpx.AsyncClient, url: str, max_bytes: int
+    ) -> tuple[int, float | None, bytes | None]:
         current_url = url
         for redirect_count in range(DOWNLOAD_REDIRECT_LIMIT + 1):
-            response = await client.get(current_url, follow_redirects=False)
-            status = getattr(response, "status_code", 200)
-            if status not in (301, 302, 303, 307, 308):
-                return response, current_url
-
-            headers = getattr(response, "headers", None)
-            location = headers.get("location") or headers.get("Location") if headers else None
-            if not location:
-                raise RequestFailedError(
-                    f"Playerok download redirect has no Location header ({current_url})"
-                )
-            if redirect_count >= DOWNLOAD_REDIRECT_LIMIT:
-                raise RequestFailedError(
-                    f"Playerok download exceeded {DOWNLOAD_REDIRECT_LIMIT} redirects ({url})"
-                )
-            current_url = self._check_download_url(urljoin(current_url, location))
+            async with client.stream("GET", current_url) as response:
+                status = response.status_code
+                if status in (301, 302, 303, 307, 308):
+                    location = response.headers.get("location")
+                    if not location:
+                        raise RequestFailedError(
+                            "PlayerOK download redirect has no Location header"
+                        )
+                    if redirect_count >= DOWNLOAD_REDIRECT_LIMIT:
+                        raise RequestFailedError(
+                            f"PlayerOK download exceeded {DOWNLOAD_REDIRECT_LIMIT} redirects"
+                        )
+                    current_url = self._check_download_url(urljoin(current_url, location))
+                    continue
+                if not 200 <= status < 300:
+                    return status, _retry_after(response.headers), None
+                return status, None, await self._read_download(response, max_bytes)
 
         raise AssertionError("unreachable")
 
-    async def download(self, url: str) -> bytes:
+    @staticmethod
+    async def _read_download(response: httpx.Response, max_bytes: int) -> bytes:
+        if response.headers.get("content-encoding", "identity").lower() not in {"", "identity"}:
+            raise RequestFailedError("PlayerOK download used an unexpected content encoding")
+        length = response.headers.get("content-length")
+        try:
+            announced = int(length) if length is not None else None
+        except ValueError:
+            announced = None
+        if announced is not None and announced > max_bytes:
+            raise DownloadTooLargeError(f"PlayerOK download exceeds {max_bytes} bytes")
+        data = bytearray()
+        async for chunk in response.aiter_raw():
+            if len(chunk) > max_bytes - len(data):
+                raise DownloadTooLargeError(f"PlayerOK download exceeds {max_bytes} bytes")
+            data.extend(chunk)
+        return bytes(data)
+
+    async def download(
+        self, url: str, *, max_bytes: int = DEFAULT_DOWNLOAD_MAX_BYTES, timeout: float | None = None
+    ) -> bytes:
         """Download a file by URL from an allowlisted host without the session cookie."""
+        if type(max_bytes) is not int or max_bytes <= 0:
+            raise ValueError("max_bytes must be a positive integer")
+        if timeout is not None and (not isfinite(timeout) or timeout <= 0):
+            raise ValueError("timeout must be positive and finite")
         url = self._check_download_url(url)
+        async with asyncio.timeout(timeout):
+            return await self._download(url, max_bytes)
+
+    async def _download(self, url: str, max_bytes: int) -> bytes:
         client = self._get_download_client()
         last_error: Exception | None = None
 
         for attempt in range(DOWNLOAD_ATTEMPTS):
             retry_after = None
             try:
-                response, response_url = await self._get_download_response(client, url)
-            except (PermissionError, ValueError, RequestFailedError):
-                raise
-            except Exception as exc:
+                status, retry_after, content = await self._download_once(client, url, max_bytes)
+            except httpx.TransportError as exc:
                 last_error = exc
             else:
-                status = getattr(response, "status_code", 200)
-                if 200 <= status < 300:
-                    content = getattr(response, "content", None)
-                    if content is not None:
-                        return content
-                    return getattr(response, "text", "").encode()
-
-                retry_after = _retry_after(getattr(response, "headers", None))
+                if content is not None:
+                    return content
                 if status == 429:
                     last_error = RateLimitedError(
-                        f"Playerok rate limited the download: HTTP 429 ({response_url})"
+                        "PlayerOK rate limited the download: HTTP 429", retry_after=retry_after
                     )
                 elif status >= 500:
-                    last_error = RequestFailedError(
-                        f"Playerok download failed: HTTP {status} ({response_url})"
+                    error = (
+                        TransientRequestError
+                        if status in {500, 502, 503, 504}
+                        else RequestFailedError
                     )
+                    last_error = error(f"PlayerOK download failed: HTTP {status}")
                 else:
-                    raise RequestFailedError(
-                        f"Playerok download failed: HTTP {status} ({response_url})"
-                    )
+                    raise RequestFailedError(f"PlayerOK download failed: HTTP {status}")
 
             if attempt + 1 < DOWNLOAD_ATTEMPTS:
                 await asyncio.sleep(_backoff(attempt, retry_after))
 
-        if isinstance(last_error, RateLimitedError):
+        if isinstance(last_error, RequestFailedError):
             raise last_error
-        raise RequestFailedError(f"Failed to download {url}: {last_error}") from last_error
+        error = (
+            TransientRequestError
+            if isinstance(last_error, (httpx.TimeoutException, httpx.NetworkError))
+            else RequestFailedError
+        )
+        raise error("PlayerOK download failed") from last_error
 
     async def close(self) -> None:
         if self._download_client is not None:

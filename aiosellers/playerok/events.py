@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from .entities.chat import Chat, ChatMessage
 from .entities.deal import Deal
@@ -16,6 +16,13 @@ else:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+@dataclass(slots=True)
+class ConnectionStatusEvent:
+    client: Playerok
+    state: Literal["connected", "reconnecting"]
+    type: EventTypes = EventTypes.CONNECTION_STATUS
 
 
 @dataclass(slots=True)
@@ -102,7 +109,8 @@ class NewReviewEvent:
 
 
 PlayerokEvent = (
-    ChatInitializedEvent
+    ConnectionStatusEvent
+    | ChatInitializedEvent
     | NewMessageEvent
     | NewDealEvent
     | ItemPaidEvent

@@ -4,6 +4,31 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `SellerHub.stream(error_policy="raise" | "yield")` lets callers observe session
+  failures. `buffered=False` defers advancing each listener until its event has
+  been consumed. `HubEvent.to_dict()` provides a versioned JSON representation.
+- Added portable auth, configuration, transient and rate-limit error classes.
+  Platform-specific exception imports still work.
+- Added `SellerSession` for bounded message history, own listings, recent
+  orders/deals, and sending text. It supports a deadline per operation.
+- PlayerOK offers opt-in checkpoint write batching via `state_flush_interval`.
+
+### Changed
+
+- PlayerOK's WebSocket connects directly when no proxy is configured. Set
+  `ws_use_system_proxy=True` to use automatic system proxy discovery.
+- PlayerOK attachment downloads stream with a 16 MiB default size limit. Pass
+  `max_bytes` to change it, or `timeout` to set a deadline for the whole download.
+
+### Fixed
+
+- PlayerOK distinguishes explicit session rejection from network, permission and
+  Cloudflare errors, and propagates fatal listener failures to consumers.
+- Closing a FunPay or GGsel client stops active event iterators before closing
+  the transport.
+
 ## [0.4.0] - 2026-11-26
 
 ### Changed

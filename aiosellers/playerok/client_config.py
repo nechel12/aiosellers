@@ -24,6 +24,7 @@ class PlayerokClientConfig:
         max_concurrent_handlers: How many handlers of one event run in parallel
         state: Optional store for cursors and dedup windows that survive restarts
         proxy: Proxy URL used for HTTP, downloads and WebSocket connections
+        ws_use_system_proxy: Allow WebSocket proxy discovery if no explicit proxy is set
     """
 
     access_token: str | None = field(default=None, repr=False)
@@ -38,3 +39,4 @@ class PlayerokClientConfig:
     max_concurrent_handlers: int = 10
     state: StateStore | None = None
     proxy: str | None = field(default=None, repr=False)
+    ws_use_system_proxy: bool = False

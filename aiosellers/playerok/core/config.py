@@ -14,6 +14,7 @@ class PlayerokConfig:
         base_url: str | None = None,
         proxy: str | None = None,
         ws_url: str | None = None,
+        ws_use_system_proxy: bool = False,
     ):
         self.user_agent = user_agent or random.choice(EXAMPLE_USER_AGENTS)
         self.request_timeout = request_timeout or 10.0
@@ -40,6 +41,7 @@ class PlayerokConfig:
             else f"{ws_scheme}://{authority}{base_path}/graphql"
         )
         self.proxy = proxy
+        self.ws_use_system_proxy = ws_use_system_proxy
 
     @property
     def headers(self):

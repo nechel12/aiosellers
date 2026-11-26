@@ -1,5 +1,8 @@
 import asyncio
+import json
 import unittest
+from contextlib import aclosing
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from aiosellers import (
@@ -9,6 +12,7 @@ from aiosellers import (
     FunPayClientConfig,
     GGsel,
     GGselClientConfig,
+    HubEvent,
     Platform,
     Playerok,
     PlayerokClientConfig,
@@ -16,6 +20,7 @@ from aiosellers import (
     SellerHub,
 )
 from aiosellers.core import capabilities_for, event_kind
+from aiosellers.funpay.exceptions import UnauthorizedError
 from aiosellers.funpay.schemas import EventTypes as FunPayEvents
 from aiosellers.ggsel.schemas import EventTypes as GGselEvents
 from aiosellers.playerok.schemas import EventTypes as PlayerokEvents
@@ -101,6 +106,37 @@ class CapabilityTests(unittest.TestCase):
         mystery = SimpleNamespace(name="SOMETHING_ELSE")
         self.assertIs(event_kind(Platform.PLAYEROK, _event(mystery)), EventKind.OTHER)
 
+    def test_wire_message_has_stable_id_and_only_explicit_fields(self):
+        time = datetime(2026, 1, 2, tzinfo=timezone.utc)
+        native = SimpleNamespace(
+            client=object(),
+            type=PlayerokEvents.NEW_MESSAGE,
+            chat=SimpleNamespace(id="chat", private="not on the wire"),
+            message=SimpleNamespace(id="m-1", user_id="u-1", text="hello", sent_at=time),
+        )
+        first = HubEvent(Platform.PLAYEROK, "tmp-1", EventKind.MESSAGE, native, "acct")
+        second = HubEvent(Platform.PLAYEROK, "tmp-2", EventKind.MESSAGE, native, "acct")
+        other = HubEvent(Platform.PLAYEROK, "tmp-1", EventKind.MESSAGE, native, "another")
+        data = json.loads(json.dumps(first.to_dict()))
+        self.assertEqual(data["event_id"], second.event_id)
+        self.assertNotEqual(data["event_id"], other.event_id)
+        self.assertEqual(data["occurred_at"], time.isoformat())
+        self.assertEqual(data["raw_type"], "NEW_MESSAGE")
+        self.assertEqual(data["version"], 1)
+        self.assertEqual(
+            data["payload"],
+            {"chat_id": "chat", "message_id": "m-1", "sender_id": "u-1", "text": "hello"},
+        )
+
+    def test_wire_does_not_invent_timestamp_or_occurrence_id(self):
+        native = SimpleNamespace(
+            type=FunPayEvents.ORDER_STATUS_CHANGED, order=SimpleNamespace(id="o")
+        )
+        event = HubEvent(Platform.FUNPAY, "shop", EventKind.ORDER, native, "acct")
+        self.assertIsNone(event.event_id)
+        self.assertIsNone(event.occurred_at)
+        self.assertEqual(event.to_dict()["payload"], {"order_id": "o"})
+
 
 class HubTests(unittest.IsolatedAsyncioTestCase):
     def test_both_clients_satisfy_the_protocol(self):
@@ -175,6 +211,64 @@ class HubTests(unittest.IsolatedAsyncioTestCase):
         merged = [item async for item in hub.stream()]
 
         self.assertEqual([item.session_id for item in merged], ["working"])
+
+    async def test_can_raise_original_listener_error(self):
+        error = UnauthorizedError("secret error body")
+
+        class Client(_FakeClient):
+            async def listen(self, **options):
+                raise error
+                yield
+
+        hub = SellerHub()
+        hub.add(Client(), platform="funpay")
+        async with aclosing(hub.stream(error_policy="raise")) as stream:
+            with self.assertRaises(UnauthorizedError) as failure:
+                await anext(stream)
+        self.assertIs(failure.exception, error)
+
+    async def test_can_yield_failure_without_stopping_other_sessions(self):
+        error = UnauthorizedError("secret error body")
+
+        class Client(_FakeClient):
+            async def listen(self, **options):
+                raise error
+                yield
+
+        hub = SellerHub()
+        hub.add(Client(), platform="funpay", session_id="broken")
+        hub.add(_FakeClient([_event(PlayerokEvents.NEW_MESSAGE)]), platform="playerok")
+        events = [event async for event in hub.stream(error_policy="yield")]
+        failure = next(event for event in events if event.kind is EventKind.ERROR)
+        self.assertEqual(failure.session_id, "broken")
+        self.assertIs(failure.error, error)
+        self.assertEqual(failure.to_dict()["payload"], {"code": "auth"})
+        self.assertNotIn("secret", json.dumps(failure.to_dict()))
+        self.assertTrue(any(event.kind is EventKind.MESSAGE for event in events))
+
+    async def test_unbuffered_mode_does_not_acknowledge_the_last_yield_on_close(self):
+        committed = []
+        closed = []
+
+        class Client(_FakeClient):
+            async def listen(self, **options):
+                try:
+                    for i in (1, 2):
+                        yield i
+                        committed.append(i)
+                finally:
+                    closed.append(True)
+
+        hub = SellerHub()
+        hub.add(Client(), platform="funpay")
+        async with aclosing(hub.stream(buffered=False)) as stream:
+            self.assertEqual((await anext(stream)).event, 1)
+            await asyncio.sleep(0)
+            self.assertEqual(committed, [])
+            self.assertEqual((await anext(stream)).event, 2)
+            self.assertEqual(committed, [1])
+        self.assertEqual(committed, [1])
+        self.assertEqual(closed, [True])
 
     async def test_leaving_the_stream_cancels_listeners(self):
         client = _FakeClient([_event(FunPayEvents.NEW_MESSAGE)], hold=True)

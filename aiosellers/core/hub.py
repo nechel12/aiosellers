@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from .capabilities import Capability, Platform, capabilities_for
 from .events import EventKind, HubEvent, event_kind
@@ -35,6 +35,28 @@ class Session:
     @property
     def capabilities(self) -> Capability:
         return capabilities_for(self.platform)
+
+    @property
+    def account_id(self) -> str | None:
+        field = {
+            Platform.FUNPAY: "account_id",
+            Platform.PLAYEROK: "me_id",
+            Platform.GGSEL: "seller_id",
+        }
+        value = getattr(self.client, field[self.platform], None)
+        return str(value) if isinstance(value, (int, str)) and value else None
+
+
+@dataclass(slots=True)
+class _End:
+    session: Session
+    error: Exception | None
+
+
+@dataclass(slots=True)
+class _Delivery:
+    event: HubEvent
+    resume: asyncio.Future[None] | None
 
 
 class SellerHub:
@@ -136,54 +158,94 @@ class SellerHub:
     async def __aexit__(self, exc_type, exc, tb) -> None:  # noqa: ANN001
         await self.close()
 
-    async def stream(self) -> AsyncIterator[HubEvent]:
+    async def stream(
+        self, *, error_policy: Literal["log", "yield", "raise"] = "log", buffered: bool = True
+    ) -> AsyncGenerator[HubEvent, None]:
         """Merge listeners of all sessions until every listener stops.
 
         Sessions must be started first; the hub does not start them implicitly.
-        Breaking out of the loop cancels all listener tasks.
+        Use ``aclosing()`` for early exit. ``error_policy="yield"`` reports a failed session
+        while others continue; ``"raise"`` re-raises its exception and stops all pumps.
+        With ``buffered=False``, a producer is resumed only when the consumer requests
+        another event. Persist the received event before doing that if replay matters.
         """
         if not self._sessions:
             raise RuntimeError("The hub has no sessions")
+        if error_policy not in {"log", "yield", "raise"}:
+            raise ValueError("Unknown stream error policy")
 
-        queue: asyncio.Queue[HubEvent | tuple[str, None]] = asyncio.Queue(
-            maxsize=self._stream_buffer
-        )
+        queue: asyncio.Queue[_Delivery | _End] = asyncio.Queue(maxsize=self._stream_buffer)
+        closing = False
 
         async def pump(session: Session) -> None:
-            cancelled = False
+            error: Exception | None = None
             try:
-                async for event in session.client.listen(**session.listen_options):
-                    await queue.put(
-                        HubEvent(
-                            platform=session.platform,
-                            session_id=session.id,
-                            kind=event_kind(session.platform, event),
-                            event=event,
+                listener = session.client.listen(**session.listen_options)
+                try:
+                    async for event in listener:
+                        resume = None if buffered else asyncio.get_running_loop().create_future()
+                        await queue.put(
+                            _Delivery(
+                                HubEvent(
+                                    platform=session.platform,
+                                    session_id=session.id,
+                                    kind=event_kind(session.platform, event),
+                                    event=event,
+                                    account_id=session.account_id,
+                                ),
+                                resume,
+                            )
                         )
-                    )
+                        if resume is not None:
+                            await resume
+                finally:
+                    close = getattr(listener, "aclose", None)
+                    if close is not None:
+                        await close()
             except asyncio.CancelledError:
-                cancelled = True
-                raise
-            except Exception:
-                logger.exception(
-                    "Listener of %s session %s stopped", session.platform.value, session.id
-                )
-            finally:
-                # A cancelled pump may be blocked on a full queue: the consumer
-                # has already stopped, so a sentinel would never be consumed.
-                if not cancelled:
-                    await queue.put((session.id, None))
+                if closing:
+                    raise
+                error = RuntimeError("The session listener was cancelled")
+                if error_policy == "log":
+                    logger.warning(
+                        "Listener of %s session %s was cancelled",
+                        session.platform.value,
+                        session.id,
+                    )
+            except Exception as exc:
+                error = exc
+                if error_policy == "log":
+                    logger.exception(
+                        "Listener of %s session %s stopped", session.platform.value, session.id
+                    )
+            if closing:
+                return
+            await queue.put(_End(session, error))
 
         tasks = [asyncio.create_task(pump(session)) for session in self._sessions.values()]
         pending = len(tasks)
         try:
             while pending:
                 item = await queue.get()
-                if isinstance(item, tuple):
+                if isinstance(item, _End):
                     pending -= 1
+                    if item.error is not None:
+                        if error_policy == "raise":
+                            raise item.error
+                        if error_policy == "yield":
+                            yield HubEvent(
+                                item.session.platform,
+                                item.session.id,
+                                EventKind.ERROR,
+                                item.error,
+                                item.session.account_id,
+                            )
                     continue
-                yield item
+                yield item.event
+                if item.resume is not None and not item.resume.done():
+                    item.resume.set_result(None)
         finally:
+            closing = True
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)

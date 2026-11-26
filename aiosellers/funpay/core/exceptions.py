@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from ...core.exceptions import AiosellersError, AuthError, TransientError
+from ...core.exceptions import RateLimitedError as CommonRateLimitedError
 
-class FunPayError(Exception):
+
+class FunPayError(AiosellersError):
     pass
 
 
@@ -22,11 +25,15 @@ class RequestFailedError(FunPayError):
         super().__init__(message or self.body or "request failed")
 
 
-class UnauthorizedError(RequestFailedError):
+class UnauthorizedError(AuthError, RequestFailedError):
     pass
 
 
-class RateLimitedError(RequestFailedError):
+class RateLimitedError(CommonRateLimitedError, RequestFailedError):
+    pass
+
+
+class TransientRequestError(TransientError, RequestFailedError):
     pass
 
 

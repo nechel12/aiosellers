@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from contextlib import aclosing
 from dataclasses import dataclass, fields
 from typing import Any, cast
 
@@ -57,6 +58,7 @@ class GGsel:
         self._use_identity_map = config.use_identity_map
         self._seller_id: int | None = config.seller_id
         self._polling_task: asyncio.Task | None = None
+        self._listeners: set[EventListener] = set()
         self._lifecycle_lock = asyncio.Lock()
 
         if self._use_identity_map:
@@ -148,8 +150,13 @@ class GGsel:
     async def close(self) -> None:
         async with self._lifecycle_lock:
             transport = self._transport
+            listeners = tuple(self._listeners)
+            for listener in listeners:
+                listener.control.stop()
+            self._listeners.clear()
             self._transport = None
             self._raw = None
+            await asyncio.gather(*(listener.control.aclose() for listener in listeners))
             if self._use_identity_map:
                 self._identity_maps.chats.clear()
                 self._identity_maps.products.clear()
@@ -164,16 +171,32 @@ class GGsel:
         reviews: bool = True,
         interval: float | None = None,
         **listener_options: Any,
-    ):
-        if self._transport is None:
+    ) -> AsyncGenerator[GGselEvent, None]:
+        transport = self._transport
+        if transport is None:
             raise RuntimeError("Client is not started. Call start() or start_polling() first.")
         listener_options.setdefault("state", self._config.state)
-        return EventListener(self, **listener_options).listen(
-            messages=messages,
-            sales=sales,
-            reviews=reviews,
-            interval=interval,
-        )
+
+        async def read() -> AsyncGenerator[GGselEvent, None]:
+            if self._transport is not transport:
+                return
+            listener = EventListener(self, **listener_options)
+            self._listeners.add(listener)
+            try:
+                async with aclosing(
+                    listener.listen(
+                        messages=messages,
+                        sales=sales,
+                        reviews=reviews,
+                        interval=interval,
+                    )
+                ) as source:
+                    async for event in source:
+                        yield event
+            finally:
+                self._listeners.discard(listener)
+
+        return read()
 
     async def start_polling(
         self,
