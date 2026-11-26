@@ -19,6 +19,7 @@ class GGselClientConfig:
         base_url: Base URL of the seller API
         locale: Locale sent to product and review endpoints
         use_identity_map: Reuse the same entity object for the same id
+        identity_map_limit: Maximum cached entities per identity bucket (None = unlimited)
         handler_timeout: Max seconds a single event handler may run (None disables)
         max_concurrent_handlers: How many handlers of one event run in parallel
         poll_interval: Seconds between polling ticks
@@ -33,6 +34,7 @@ class GGselClientConfig:
     base_url: str = "https://seller.ggsel.com/"
     locale: str = "ru-RU"
     use_identity_map: bool = True
+    identity_map_limit: int | None = 5000
     handler_timeout: float | None = 30.0
     max_concurrent_handlers: int = 10
     poll_interval: float = 5.0

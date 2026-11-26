@@ -71,8 +71,6 @@ class Chat:
         return await self._require_client().account.get_user(self.user_id)
 
     async def get_deals(self) -> list[Deal]:
-        from .deal import Deal
-
         client = self._require_client()
         schema = await client._require_raw().chats.get_chat(self.id)
         if schema is None or not schema.deals:
@@ -80,15 +78,9 @@ class Chat:
 
         deals = []
         for deal_schema in schema.deals:
-            deal = Deal(
-                id=deal_schema.id,
-                status=deal_schema.status,
-                user_id=deal_schema.user.id if deal_schema.user else None,
-                chat_id=self.id,
-            )
-            deal._client = client
-            if client._use_identity_map:
-                client._identity_maps.deals.set(deal_schema.id, deal)
+            deal = client.deals._create_deal(deal_schema)
+            if deal.chat_id is None:
+                deal.chat_id = self.id
             deals.append(deal)
 
         return deals

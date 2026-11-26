@@ -1,7 +1,7 @@
 # API overview
 
-This page is a map of the public API. Detailed signatures and docstrings live in
-the source and in the `aiosellers` package itself.
+This page summarizes the public API. See the `aiosellers` package source for
+signatures and docstrings.
 
 ## Top-level package
 
@@ -73,9 +73,11 @@ from aiosellers.funpay import FunPay, FunPayClientConfig
 - `client.listen(...)` and `client.start_polling(...)`.
 
 Important config fields: `golden_key`, `poll_interval`, `request_timeout`,
-`max_concurrent_requests`, `state`, `bot_mark`, `handler_timeout`.
+`max_concurrent_requests`, `state`, `bot_mark`, `handler_timeout`,
+`identity_map_limit`. Listener pacing options such as `order_page_limit` and
+`chat_history_batches` can be passed to `listen()`/`start_polling()`.
 
-## Playerok
+## PlayerOK
 
 ```python
 from aiosellers.playerok import Playerok, PlayerokClientConfig
@@ -90,8 +92,16 @@ from aiosellers.playerok import Playerok, PlayerokClientConfig
 - `client.download(url)` — host-allowlisted file download.
 - `client.listen(...)` and `client.start_polling(...)`.
 
-Playerok uses GraphQL over HTTP and a WebSocket subscription feed. The feed
-reconnects with backoff and reconciles missed chats after a reconnect.
+PlayerOK uses GraphQL over HTTP and WebSocket subscriptions. After reconnecting
+with backoff, the listener replays unprocessed messages within its recovery
+window. The seller's own messages are skipped by default
+(`include_own=True` opts in).
+
+With a `StateStore`, `client.listen()` checkpoints messages and reviews when
+iteration resumes after the relevant events. Closing the stream before
+resuming can cause those events to be replayed within the listener's recovery
+window. Make handlers idempotent; the stream does not guarantee exactly-once
+delivery.
 
 ## GGsel
 
@@ -107,7 +117,8 @@ from aiosellers.ggsel import GGsel, GGselClientConfig
 - `client.products` — products and price updates.
 - `client.sales` — sales and purchase details.
 - `client.reviews` — seller reviews.
-- `client.listen(...)` and `client.start_polling(...)`.
+- `client.listen(...)` and `client.start_polling(...)`, both accept listener
+  limits (`chats_page_size`, `history_limit`, `sales_top`, ...).
 
 GGsel uses Seller API V1 with a signed login, token refresh and polling. There
 are no webhooks; a configured `StateStore` keeps chat/sale/review cursors across
@@ -123,7 +134,7 @@ failures, GraphQL errors and persisted-query expiry.
 Transport behavior:
 
 - GET requests retry transient network/5xx failures.
-- POST requests are single-shot unless the platform operation is explicitly
+- POST requests are not retried unless the platform operation is explicitly
   marked safe to retry.
 - `Retry-After` is honored.
 - Event handlers have a timeout and a concurrency limit.

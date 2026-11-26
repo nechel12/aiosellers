@@ -66,10 +66,24 @@ class SellerHub:
         listen_options: dict[str, Any] | None = None,
     ) -> Session:
         platform = Platform(platform)
+        declared = getattr(client, "platform", None)
+        if declared is not None and Platform(declared) is not platform:
+            raise ValueError(
+                f"Client platform {Platform(declared).value!r} does not match {platform.value!r}"
+            )
         if session_id is None:
-            counter = self._counters.get(platform, 0) + 1
+            counter = self._counters.get(platform, 0)
+            while True:
+                counter += 1
+                candidate = f"{platform.value}-{counter}"
+                if candidate not in self._sessions:
+                    session_id = candidate
+                    break
             self._counters[platform] = counter
-            session_id = f"{platform.value}-{counter}"
+        elif session_id.startswith(f"{platform.value}-"):
+            suffix = session_id[len(platform.value) + 1 :]
+            if suffix.isdigit():
+                self._counters[platform] = max(self._counters.get(platform, 0), int(suffix))
         if session_id in self._sessions:
             raise ValueError(f"Session {session_id!r} is already registered")
         session = Session(

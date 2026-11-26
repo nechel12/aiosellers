@@ -14,57 +14,77 @@ _ORDER_ID = re.compile(r"#([A-Z0-9]{8})")
 
 _PURCHASED_1 = re.compile(
     rf"(?:Покупатель {_USER} оплатил заказ {_ORDER}\."
-    rf"|The buyer {_USER} has paid for order {_ORDER}\.)"
+    rf"|The buyer {_USER} has paid for order {_ORDER}\."
+    rf"|Покупець {_USER} оплатив замовлення {_ORDER}\.)"
 )
 _PURCHASED_2 = re.compile(
     rf"(?:{_USER}, не забудьте потом нажать кнопку "
     rf"«Подтвердить (?:выполнение заказа|получение валюты)»\."
     rf"|{_USER}, do not forget to press the "
-    rf"«Confirm (?:order fulfilment|currency receipt)» button once you finish\.)"
+    rf"«Confirm (?:order fulfilment|currency receipt)» button once you finish\."
+    rf"|{_USER}, не забудьте натиснути кнопку "
+    rf"«Підтвердити (?:виконання замовлення|отримання валюти)»\.)"
 )
 _CONFIRMED = re.compile(
     rf"(?:Покупатель {_USER} подтвердил успешное выполнение заказа {_ORDER} "
     rf"и отправил деньги продавцу {_USER}\."
     rf"|The buyer {_USER} has confirmed that order {_ORDER} has been fulfilled "
-    rf"successfully and that the seller {_USER} has been paid\.)"
+    rf"successfully and that the seller {_USER} has been paid\."
+    rf"|Покупець {_USER} підтвердив успішне виконання замовлення {_ORDER} "
+    rf"і відправив гроші продавцю {_USER}\.)"
 )
 _NEW_FEEDBACK = re.compile(
     rf"(?:Покупатель {_USER} написал отзыв к заказу {_ORDER}\."
-    rf"|The buyer {_USER} has given feedback to the order {_ORDER}\.)"
+    rf"|The buyer {_USER} has given feedback to the order {_ORDER}\."
+    rf"|Покупець {_USER} написав відгук до замовлення {_ORDER}\.)"
 )
 _NEW_ANSWER = re.compile(
     rf"(?:Продавец {_USER} ответил на отзыв к заказу {_ORDER}\."
-    rf"|The seller {_USER} has replied to their feedback to the order {_ORDER}\.)"
+    rf"|The seller {_USER} has replied to their feedback to the order {_ORDER}\."
+    rf"|Продавець {_USER} відповів на відгук до замовлення {_ORDER}\.)"
 )
-_REOPENED = re.compile(rf"(?:Заказ {_ORDER} открыт повторно\.|Order {_ORDER} has been reopened\.)")
+_REOPENED = re.compile(
+    rf"(?:Заказ {_ORDER} открыт повторно\."
+    rf"|Order {_ORDER} has been reopened\."
+    rf"|Замовлення {_ORDER} відкрито повторно\.)"
+)
 _REFUND = re.compile(
     rf"(?:Продавец {_USER} вернул деньги покупателю {_USER} по заказу {_ORDER}\."
-    rf"|The seller {_USER} has refunded the buyer {_USER} on order {_ORDER}\.)"
+    rf"|The seller {_USER} has refunded the buyer {_USER} on order {_ORDER}\."
+    rf"|Продавець {_USER} повернув гроші покупцю {_USER} за замовленням {_ORDER}\.)"
 )
 _ADMIN_REFUND = re.compile(
     rf"(?:Администратор {_USER} вернул деньги покупателю {_USER} по заказу {_ORDER}\."
-    rf"|The administrator {_USER} has refunded the buyer {_USER} on order {_ORDER}\.)"
+    rf"|The administrator {_USER} has refunded the buyer {_USER} on order {_ORDER}\."
+    rf"|Адміністратор {_USER} повернув гроші покупцю {_USER} за замовленням {_ORDER}\.)"
 )
 _PARTIAL = re.compile(
     rf"(?:Часть средств по заказу {_ORDER} возвращена покупателю\."
-    rf"|A part of the funds pertaining to the order {_ORDER} has been refunded\.)"
+    rf"|A part of the funds pertaining to the order {_ORDER} has been refunded\."
+    rf"|Частину коштів за замовленням {_ORDER} повернено покупцю\.)"
 )
 _ADMIN_CONFIRM = re.compile(
     rf"(?:Администратор {_USER} подтвердил успешное выполнение заказа {_ORDER} "
     rf"и отправил деньги продавцу {_USER}\."
     rf"|The administrator {_USER} has confirmed that order {_ORDER} has been fulfilled "
-    rf"successfully and that the seller {_USER} has been paid\.)"
+    rf"successfully and that the seller {_USER} has been paid\."
+    rf"|Адміністратор {_USER} підтвердив успішне виконання замовлення {_ORDER} "
+    rf"і відправив гроші продавцю {_USER}\.)"
 )
 _DISCORD = (
     "Вы можете перейти в Discord. Внимание: общение за пределами сервера FunPay "
     "считается нарушением правил.",
     "You can switch to Discord. However, note that friending someone is considered a violation rules.",
+    "Ви можете перейти в Discord. Увага: спілкування за межами сервера FunPay "
+    "вважається порушенням правил.",
 )
 _VENDORS = (
     "Уважаемые продавцы, не доверяйте сообщениям в чате! Перед выполнением заказа "
     "всегда проверяйте наличие оплаты в разделе «Мои продажи».",
     "Dear vendors, do not rely on chat messages! Before you process an order, you should "
     "always check whether you've been paid in «My sales» section.",
+    "Шановні продавці, не довіряйте повідомленням у чаті! Перед виконанням замовлення "
+    "завжди перевіряйте наявність оплати в розділі «Мої продажі».",
 )
 
 _EXCHANGE = re.compile(
@@ -135,11 +155,19 @@ def classify_message(text: str | None) -> MessageTypes:
         (_NEW_FEEDBACK, MessageTypes.NEW_FEEDBACK),
         (_NEW_ANSWER, MessageTypes.NEW_FEEDBACK_ANSWER),
         (
-            ("изменил отзыв к заказу", "has edited their feedback to the order"),
+            (
+                "изменил отзыв к заказу",
+                "has edited their feedback to the order",
+                "змінив відгук до замовлення",
+            ),
             MessageTypes.FEEDBACK_CHANGED,
         ),
         (
-            ("удалил отзыв к заказу", "has deleted their feedback to the order"),
+            (
+                "удалил отзыв к заказу",
+                "has deleted their feedback to the order",
+                "видалив відгук до замовлення",
+            ),
             MessageTypes.FEEDBACK_DELETED,
         ),
         (_REFUND, MessageTypes.REFUND),
@@ -147,6 +175,7 @@ def classify_message(text: str | None) -> MessageTypes:
             (
                 "изменил ответ на отзыв к заказу",
                 "has edited a reply to their feedback to the order",
+                "змінив відповідь на відгук до замовлення",
             ),
             MessageTypes.FEEDBACK_ANSWER_CHANGED,
         ),
@@ -154,6 +183,7 @@ def classify_message(text: str | None) -> MessageTypes:
             (
                 "удалил ответ на отзыв к заказу",
                 "has deleted a reply to their feedback to the order",
+                "видалив відповідь на відгук до замовлення",
             ),
             MessageTypes.FEEDBACK_ANSWER_DELETED,
         ),

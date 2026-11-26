@@ -34,6 +34,7 @@ class RawItemsService:
         attributes: list[dict[str, str]] | None = None,
         search: str | None = None,
         sort: ItemsSortOptions | None = None,
+        statuses: list[str] | None = None,
     ) -> ItemList | None:
         if not any([game_id, category_id, user_id]):
             raise ValueError("Can't get items without game_id and category_id, and without user_id")
@@ -54,6 +55,7 @@ class RawItemsService:
                 attributes=attributes,
                 search=search,
                 sort=sort,
+                statuses=statuses,
             ),
             retry=True,
         )
@@ -191,7 +193,7 @@ class RawItemsService:
         response = await self._transport.request("post", "graphql", GQL.remove_item(id=id))
         raw = response.json()
         _raise_on_gql_errors(raw)
-        return True
+        return bool(_dig(raw, ("data", "removeItem")))
 
     async def publish_item(
         self,

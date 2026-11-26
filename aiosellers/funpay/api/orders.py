@@ -58,7 +58,7 @@ class OrderAPI:
             subcategory_name=snap.subcategory_name,
             html=snap.html,
         )
-        return self._client.remember("orders", snap.id, order)
+        return self._client.remember("orders", snap.id, order, partial=True)
 
     def _from_snapshot(self, snap: OrderSnapshot) -> Order:
         order = Order(
@@ -114,16 +114,24 @@ class OrderAPI:
             allowed.add(OrderStatuses.REFUNDED)
             allowed.add(OrderStatuses.PARTIALLY_REFUNDED)
         rows = [row for row in rows if row.status in allowed]
-        if limit is not None:
+        if limit is not None and limit > 0:
             rows = rows[:limit]
         return cursor, [self._from_shortcut(row) for row in rows]
 
     async def iter(self, *, side: OrderSide = OrderSide.SALE, **filters) -> AsyncIterator[Order]:
         cursor = filters.pop("cursor", None)
+        limit = filters.pop("limit", None)
+        if limit is not None and limit <= 0:
+            return
+        yielded = 0
         while True:
-            cursor, rows = await self.list(side=side, cursor=cursor, **filters)
+            page_limit = None if limit is None else max(1, limit - yielded)
+            cursor, rows = await self.list(side=side, cursor=cursor, limit=page_limit, **filters)
             for row in rows:
                 yield row
+                yielded += 1
+                if limit is not None and yielded >= limit:
+                    return
             if not cursor:
                 return
 

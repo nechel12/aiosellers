@@ -126,6 +126,39 @@ def _snap(message_id: int, text: str = "text") -> MessageSnapshot:
 
 
 class FunPayEventTests(unittest.IsolatedAsyncioTestCase):
+    def test_only_status_cell_can_override_paid_order_to_partial_refund(self) -> None:
+        row = _order_row("ABCD1234", "info").replace("аккаунт", "partially refunded item")
+        _, orders = parse_order_list(row, side=OrderSide.SALE)
+        self.assertEqual(orders[0].status.name, "PAID")
+
+        row = row.replace("</a>", '<div class="tc-status">Частково повернено</div></a>')
+        _, orders = parse_order_list(row, side=OrderSide.SALE)
+        self.assertEqual(orders[0].status.name, "PARTIALLY_REFUNDED")
+
+    async def test_new_chat_accepts_sparse_ids_at_end_of_history(self) -> None:
+        _, listener, raw = _listener()
+        raw.payloads.append(_runner(""))
+        await listener.tick(orders=False, purchases=False)
+
+        raw.payloads.append(_runner(BOOKMARK.format(node=100, text="first")))
+        raw.history_pages = {101: [_snap(100)], 100: []}
+        events = await listener.tick(orders=False, purchases=False)
+
+        self.assertEqual(
+            [event.message.id for event in events if isinstance(event, NewMessageEvent)], [100]
+        )
+        self.assertEqual(listener._chats[3][0], 100)
+
+    async def test_empty_first_history_page_does_not_commit_the_bookmark(self) -> None:
+        _, listener, raw = _listener()
+        raw.payloads.append(_runner(BOOKMARK.format(node=10, text="old")))
+        await listener.tick(orders=False, purchases=False)
+
+        raw.payloads.append(_runner(BOOKMARK.format(node=11, text="new")))
+        events = await listener.tick(orders=False, purchases=False)
+        self.assertFalse(any(isinstance(event, NewMessageEvent) for event in events))
+        self.assertEqual(listener._chats[3][0], 10)
+
     async def test_bookmark_ticks_and_image_preview(self) -> None:
         _client, listener, raw = _listener()
         raw.payloads.append(_runner(BOOKMARK.format(node=10, text="hi")))

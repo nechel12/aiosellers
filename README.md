@@ -1,16 +1,15 @@
 # All-In-One Sellers API
 
-**English** | [Русский](README.ru.md)
+**English** | [Русский](https://github.com/nechel12/aiosellers/blob/main/README.ru.md)
+
+Asynchronous Python clients for **FunPay**, **PlayerOK**, and **GGsel**, with
+a multi-account event stream and persistent listener state.
 
 [![CI](https://github.com/nechel12/aiosellers/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nechel12/aiosellers/actions/workflows/ci.yml)
-[![License](https://img.shields.io/github/license/nechel12/aiosellers)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.12%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![CodeQL](https://github.com/nechel12/aiosellers/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/nechel12/aiosellers/actions/workflows/codeql.yml)
 [![PyPI](https://img.shields.io/pypi/v/aiosellers-nechel12)](https://pypi.org/project/aiosellers-nechel12/)
-[![Last commit](https://img.shields.io/github/last-commit/nechel12/aiosellers)](https://github.com/nechel12/aiosellers/commits/main)
-[![Fork of Zewsic/aiosellers](https://img.shields.io/badge/fork-Zewsic%2Faiosellers-blueviolet?logo=github)](https://github.com/Zewsic/aiosellers)
-[![Security policy](https://img.shields.io/badge/security-policy-green)](SECURITY.md)
-[![CodeQL](https://github.com/nechel12/aiosellers/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/nechel12/aiosellers/security/code-scanning)
-[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](CONTRIBUTING.md)
+[![Tested Python versions](https://img.shields.io/pypi/pyversions/aiosellers-nechel12)](https://pypi.org/project/aiosellers-nechel12/)
+[![License](https://img.shields.io/github/license/nechel12/aiosellers)](https://github.com/nechel12/aiosellers/blob/main/LICENSE)
 
 ## Contents
 
@@ -34,64 +33,53 @@
 - [License](#license)
 - [Support the project](#support-the-project)
 
-Asynchronous Python wrapper for digital trading platforms: **FunPay**, **PlayerOK**
-and **GGsel**. One package, one event model, one multi-account hub.
-
 > [!NOTE]
 > This repository is a **fork** of
 > [Zewsic/aiosellers](https://github.com/Zewsic/aiosellers), maintained by
 > [@nechel12](https://github.com/nechel12). The fork adds the GGsel adapter, the
 > shared `aiosellers.core` layer (platforms, capabilities, `SellerHub`), durable
-> listener state, transport hardening and tests. The `aiosellers` package on PyPI
+> listener state, transport changes, and tests. The `aiosellers` package on PyPI
 > is published by the upstream project and does **not** contain these changes;
 > the fork is distributed as `aiosellers-nechel12` (see
 > [Installation](#installation)).
 
 Stack: **Python 3.12+**, asyncio, Pydantic v2, TLS requests, websockets and
-SQLite. The library talks to the platforms directly: FunPay over HTTP forms and
+SQLite. The library connects to the platforms directly: FunPay over HTTP forms and
 HTML parsing, PlayerOK over GraphQL and WebSocket subscriptions, GGsel over the
-official Seller API V1. There is no proxy service, telemetry, or third-party
-backend in the request path.
+official Seller API V1. The library does not collect telemetry or require a
+separate server or proxy service.
 
-> Status: pre-1.0. The core, transports and listeners are covered by tests, and
-> the public API is documented in docstrings and this README; coverage of the
-> high-level wrappers is still growing. Minor releases may still change behavior.
-> See [CHANGELOG.md](CHANGELOG.md).
+> Status: pre-1.0. Tests cover the core, transports, and event listeners.
+> Coverage of the high-level API is incomplete. Behavior may change in minor
+> releases.
+> See [CHANGELOG.md](https://github.com/nechel12/aiosellers/blob/main/CHANGELOG.md).
 
 ## Installation
 
-Install the fork from GitHub:
+Requires **Python 3.12+**. Install the published fork from PyPI:
+
+```bash
+pip install aiosellers-nechel12
+# or, in a uv project:
+uv add aiosellers-nechel12
+```
+
+Import the library as `aiosellers`. `pip install aiosellers` installs the
+**upstream** distribution, not this fork. Use separate environments for the
+two distributions because they install the same import package.
+
+To try changes from GitHub before a PyPI release:
 
 ```bash
 pip install "git+https://github.com/nechel12/aiosellers.git"
 ```
 
-or via uv:
-
-```bash
-uv add "git+https://github.com/nechel12/aiosellers.git"
-```
-
-The distribution name is `aiosellers-nechel12`; the import package remains
-`aiosellers`. Install it from PyPI:
-
-```bash
-pip install aiosellers-nechel12
-```
-
-`pip install aiosellers` installs the **upstream** package from PyPI, not this
-fork. Pin a commit or tag for reproducible installs:
-
-```bash
-pip install "git+https://github.com/nechel12/aiosellers.git@<tag>"
-```
-
-**Requirements:** Python 3.12+.
+Append `@<tag-or-commit>` to pin a GitHub install.
 
 ## Documentation
 
-- [API overview](docs/API.md) — public entry points and modules.
-- [Migration from upstream](docs/MIGRATION.md) — install name, changed behavior
+- [API overview](https://github.com/nechel12/aiosellers/blob/main/docs/API.md) — public entry points and modules.
+- [Migration from upstream](https://github.com/nechel12/aiosellers/blob/main/docs/MIGRATION.md) — install name, changed behavior
   and upgrade steps.
 
 ## Configuration
@@ -136,9 +124,17 @@ Playerok(PlayerokClientConfig(access_token="...", proxy="http://proxy:8080"))
 GGsel(GGselClientConfig(api_key="...", seller_id=123456, proxy="http://proxy:8080"))
 ```
 
-Playerok uses it for HTTP, uploads, downloads and WebSocket subscriptions; GGsel
-uses it for ApiLogin and every Seller API request. Proxy credentials are omitted
-from config `repr`.
+PlayerOK uses it for HTTP requests, uploads, downloads, and WebSocket
+subscriptions. GGsel uses it for ApiLogin and all Seller API requests. Proxy
+credentials are omitted from configuration representations (`repr`).
+
+PlayerOK skips the seller's own messages by default. Set `include_own=True` in
+`PlayerokClientConfig` or pass it to `listen()` or `start_polling()` to see them.
+Each entity cache has a per-client limit of 5,000 entries by default
+(`identity_map_limit`); `None` removes the limit.
+`listen()` and `start_polling()` accept listener-specific options such as
+`order_page_limit`, `chat_history_batches` (FunPay) and page/history limits
+(GGsel).
 
 ## Quick Start: PlayerOK
 
@@ -209,7 +205,7 @@ populated after the client starts, and `client.products.update_price()` /
 
 ## Multi-account hub
 
-`SellerHub` runs several FunPay, Playerok and GGsel sessions together and merges
+`SellerHub` runs several FunPay, PlayerOK, and GGsel sessions together and merges
 their events into one stream. Every item carries the platform and session id,
 while the payload stays the original typed event.
 
@@ -258,8 +254,10 @@ without hardcoding platform names. Clients also expose `stop()` to end
 ## Durable listener state
 
 Pass a `StateStore` in the client config to keep chat cursors, processed message
-ids and order snapshots across process restarts. Without a store, listeners
-rebuild their state on every launch and emit only the initial snapshots.
+IDs and order statuses across process restarts. Without a store, listeners
+still emit live events but rebuild their starting state on every launch.
+Recovery is bounded by the adapter's history and polling limits; keep event
+handlers idempotent.
 
 ```python
 import asyncio
@@ -282,7 +280,7 @@ async def main():
         GGselClientConfig(api_key="...", seller_id=123456, state=store)
     )
 
-    # ... run the clients ...
+    # Run the clients here.
 
     await store.close()
 
@@ -296,25 +294,25 @@ snapshot is ignored with a warning, and a failed write never stops polling.
 
 ## Examples
 
-Runnable samples are in [`examples/`](examples/).
+Runnable samples are in [`examples/`](https://github.com/nechel12/aiosellers/tree/main/examples).
 
 | Script | What it does |
 |:-------|:-------------|
-| [`playerok_account.py`](examples/playerok_account.py) | Profile and balance |
-| [`playerok_chats.py`](examples/playerok_chats.py) | Unread chats and latest messages |
-| [`playerok_deals.py`](examples/playerok_deals.py) | Paid and sent deals |
-| [`playerok_market.py`](examples/playerok_market.py) | Search items and average price |
-| [`playerok_bot.py`](examples/playerok_bot.py) | Commands and deal events |
-| [`transactions.py`](examples/transactions.py) | Pending transactions and cards |
-| [`funpay_account.py`](examples/funpay_account.py) | Profile, balance, transactions |
-| [`funpay_orders.py`](examples/funpay_orders.py) | Sales and an order card |
-| [`funpay_chats.py`](examples/funpay_chats.py) | Chats and message history |
-| [`funpay_lots.py`](examples/funpay_lots.py) | Lots |
-| [`funpay_bot.py`](examples/funpay_bot.py) | New order and a chat reply |
-| [`funpay_reviews.py`](examples/funpay_reviews.py) | Reply to a new review |
-| [`funpay_backtest.py`](examples/funpay_backtest.py) | Replay saved chat history |
-| [`ggsel_account.py`](examples/ggsel_account.py) | Balance and receipts |
-| [`ggsel_bot.py`](examples/ggsel_bot.py) | Chat replies and new sales |
+| [`playerok_account.py`](https://github.com/nechel12/aiosellers/blob/main/examples/playerok_account.py) | Profile and balance |
+| [`playerok_chats.py`](https://github.com/nechel12/aiosellers/blob/main/examples/playerok_chats.py) | Unread chats and latest messages |
+| [`playerok_deals.py`](https://github.com/nechel12/aiosellers/blob/main/examples/playerok_deals.py) | Paid and sent deals |
+| [`playerok_market.py`](https://github.com/nechel12/aiosellers/blob/main/examples/playerok_market.py) | Search items and average price |
+| [`playerok_bot.py`](https://github.com/nechel12/aiosellers/blob/main/examples/playerok_bot.py) | Commands and deal events |
+| [`transactions.py`](https://github.com/nechel12/aiosellers/blob/main/examples/transactions.py) | Pending transactions and cards |
+| [`funpay_account.py`](https://github.com/nechel12/aiosellers/blob/main/examples/funpay_account.py) | Profile, balance, transactions |
+| [`funpay_orders.py`](https://github.com/nechel12/aiosellers/blob/main/examples/funpay_orders.py) | Sales and an order card |
+| [`funpay_chats.py`](https://github.com/nechel12/aiosellers/blob/main/examples/funpay_chats.py) | Chats and message history |
+| [`funpay_lots.py`](https://github.com/nechel12/aiosellers/blob/main/examples/funpay_lots.py) | Lots |
+| [`funpay_bot.py`](https://github.com/nechel12/aiosellers/blob/main/examples/funpay_bot.py) | New order and a chat reply |
+| [`funpay_reviews.py`](https://github.com/nechel12/aiosellers/blob/main/examples/funpay_reviews.py) | Reply to a new review |
+| [`funpay_backtest.py`](https://github.com/nechel12/aiosellers/blob/main/examples/funpay_backtest.py) | Replay saved chat history |
+| [`ggsel_account.py`](https://github.com/nechel12/aiosellers/blob/main/examples/ggsel_account.py) | Balance and receipts |
+| [`ggsel_bot.py`](https://github.com/nechel12/aiosellers/blob/main/examples/ggsel_bot.py) | Chat replies and new sales |
 
 ```bash
 uv run python examples/playerok_account.py
@@ -363,31 +361,27 @@ durable cursors when a `StateStore` is configured.
 | **Reviews**             |    ✅    |     ✅      |
 | **Event Feed**          |    ✅    |     ✅      |
 
-Not implemented yet: the V2 offer API (offer creation/editing) and the legacy
-XML `/xml/shop_search.asp` endpoint. The V1 adapter is enough for order
-processing, messaging, reviews and price updates.
+The adapter does not support Offer API V2 (creating and editing offers) or
+the legacy XML endpoint `/xml/shop_search.asp`.
 
 ## Limitations
 
-- FunPay and PlayerOK do not provide official seller APIs; those adapters rely
-  on the same HTTP forms, GraphQL documents and WebSocket feeds the websites
-  use. Platform changes can break them, so pin a version and watch the
-  [CHANGELOG](CHANGELOG.md).
+- The FunPay and PlayerOK adapters rely on unofficial website interfaces:
+  HTTP forms, GraphQL, and WebSocket feeds. Changes to these interfaces may
+  affect compatibility. See the
+  [CHANGELOG](https://github.com/nechel12/aiosellers/blob/main/CHANGELOG.md).
 - GGsel is implemented against Seller API V1 only.
-- The library is a client, not a scheduler: the application runs the event loop
-  and decides how to deploy, scale and supervise bots.
-- Platform rules, rate limits and account bans are outside the library's
-  control. Use the APIs responsibly and at your own risk.
+- The library does not deploy, schedule, scale, or supervise bots.
+- Platform operators set their terms of use, rate limits, and account
+  enforcement policies.
 
 ## Security
 
-See [SECURITY.md](SECURITY.md) for vulnerability reporting. The library stores
-tokens in memory, passes them only to the platform endpoints, and keeps
-listener state in the provided `StateStore`. Do not log credentials, and
-protect the SQLite state file if it contains chat metadata.
-
-Report vulnerabilities through GitHub's private advisory flow, not a public
-issue.
+Use [GitHub's private vulnerability form](https://github.com/nechel12/aiosellers/security/advisories/new)
+rather than a public issue. See the [security policy](https://github.com/nechel12/aiosellers/security/policy)
+for scope and handling advice. Use only trusted custom endpoints and proxies.
+Redact logs before sharing and protect state databases, which may contain chat
+IDs and, for FunPay, message previews.
 
 ## Development
 
@@ -398,7 +392,6 @@ uv sync --locked
 uv run ruff check .
 uv run ruff format --check .
 uv run mypy aiosellers
-uv run pytest -q
 uv run pytest -q --cov=aiosellers --cov-fail-under=65
 
 uv run python examples/funpay_account.py
@@ -414,35 +407,36 @@ Structure: `aiosellers/core` (platforms, events, hub, state stores),
 
 - [Zewsic/aiosellers](https://github.com/Zewsic/aiosellers) — the upstream
   project this repository is forked from.
-- [PlayerokAPI](https://github.com/alleexxeeyy/PlayerokAPI/) — PlayerOK API
-  reference.
-- [FunPayAPI](https://github.com/LIMBODS/FunPayAPI) — FunPay API reference.
-- [FunPayCardinal](https://github.com/sidor0912/FunPayCardinal) — FunPay bot
-  built on the same ideas.
+- [PlayerokAPI](https://github.com/alleexxeeyy/PlayerokAPI/) — library for PlayerOK.
+- [FunPayAPI](https://github.com/LIMBODS/FunPayAPI) — library for FunPay.
+- [FunPayCardinal](https://github.com/sidor0912/FunPayCardinal) — bot for FunPay.
 - [fpx](https://github.com/funpayx/fpx) — another FunPay client.
 
 ## Contributing
 
-Bug reports and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md)
-for the development workflow. By participating, you agree to the
-[Code of Conduct](CODE_OF_CONDUCT.md). Before sending a change, run
-`uv run ruff check .` and `uv run pytest -q`. Report security issues through
-[SECURITY.md](SECURITY.md), not a public issue. Release notes live in
-[CHANGELOG.md](CHANGELOG.md); maintainers can follow [RELEASING.md](RELEASING.md).
+Use the [issue forms](https://github.com/nechel12/aiosellers/issues/new/choose)
+for public bug reports and feature requests. See
+[CONTRIBUTING.md](https://github.com/nechel12/aiosellers/blob/main/CONTRIBUTING.md)
+for local checks and pull requests, and the
+[Code of Conduct](https://github.com/nechel12/aiosellers/blob/main/CODE_OF_CONDUCT.md)
+for participation guidelines. Maintainers can follow
+[RELEASING.md](https://github.com/nechel12/aiosellers/blob/main/RELEASING.md).
 
 ## License
 
-The code is licensed under Apache-2.0; see [LICENSE](LICENSE) and
-[NOTICE](NOTICE), which lists what this fork adds relative to upstream. The upstream
-copyright and license notices are preserved. The PyPI package `aiosellers` is
-maintained by the upstream project and is not affiliated with this fork.
+The code is licensed under Apache-2.0; see
+[LICENSE](https://github.com/nechel12/aiosellers/blob/main/LICENSE) and
+[NOTICE](https://github.com/nechel12/aiosellers/blob/main/NOTICE), which lists
+what this fork adds relative to upstream. The upstream copyright and license
+notices are preserved. The PyPI package `aiosellers` is maintained by the
+upstream project and is not associated with this distribution.
 
 ---
 
 ## Support the project
 
-All-In-One Sellers API is free and open source. If the project saves time,
-support is welcome:
+All-In-One Sellers API is an open-source project. Financial support is
+optional:
 
 <p align="center">
   <a href="https://boosty.to/nechel12/donate">
@@ -460,5 +454,5 @@ support is welcome:
 | **BNB Smart Chain** | `0x423aF840f67355371bf32480744A84069dfab5ff` |
 
 > [!WARNING]
-> Send only the matching asset on the specified network. Transfers to another
-> network cannot be recovered.
+> Send only the matching asset on the specified network. Transfers on the
+> wrong network may be unrecoverable.

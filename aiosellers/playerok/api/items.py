@@ -172,6 +172,7 @@ class ItemAPI:
         attributes: builtins.list[dict[str, str]] | None = None,
         search: str | None = None,
         sort: ItemsSortOptions | None = None,
+        statuses: builtins.list[str] | None = None,
     ) -> builtins.list[Item]:
         result = []
         remain = limit
@@ -191,6 +192,7 @@ class ItemAPI:
                 attributes=attributes,
                 search=search,
                 sort=sort,
+                statuses=statuses,
             )
             if response is None or not response.items:
                 break
@@ -220,6 +222,7 @@ class ItemAPI:
         attributes: builtins.list[dict[str, str]] | None = None,
         search: str | None = None,
         sort: ItemsSortOptions | None = None,
+        statuses: builtins.list[str] | None = None,
     ) -> AsyncIterator[Item]:
         current_cursor = cursor
 
@@ -236,6 +239,7 @@ class ItemAPI:
                 attributes=attributes,
                 search=search,
                 sort=sort,
+                statuses=statuses,
             )
             if response is None or not response.items:
                 return
@@ -248,7 +252,11 @@ class ItemAPI:
             current_cursor = response.page_info.end_cursor
 
     async def list_self(
-        self, *, limit: int = 24, cursor: str | None = None
+        self,
+        *,
+        limit: int = 24,
+        cursor: str | None = None,
+        statuses: builtins.list[str] | None = None,
     ) -> builtins.list[MyItem]:
         result = []
         remain = limit
@@ -259,6 +267,7 @@ class ItemAPI:
                 count=min(24, remain),
                 cursor=current_cursor,
                 user_id=self._client._me_id,
+                statuses=statuses,
             )
             if response is None or not response.items:
                 break
@@ -268,19 +277,25 @@ class ItemAPI:
 
             remain -= len(response.items)
 
-            if not response.page_info.has_next_page:
+            if not response.page_info.has_next_page or not response.page_info.end_cursor:
                 break
             current_cursor = response.page_info.end_cursor
 
         return result[:limit]
 
-    async def iter_self(self, *, cursor: str | None = None) -> AsyncIterator[MyItem]:
+    async def iter_self(
+        self,
+        *,
+        cursor: str | None = None,
+        statuses: builtins.list[str] | None = None,
+    ) -> AsyncIterator[MyItem]:
         current_cursor = cursor
 
         while True:
             response = await self._client._require_raw().items.get_items(
                 cursor=current_cursor,
                 user_id=self._client._me_id,
+                statuses=statuses,
             )
             if response is None or not response.items:
                 return
@@ -288,7 +303,7 @@ class ItemAPI:
             for schema in response.items:
                 yield self._create_my_item(schema)
 
-            if not response.page_info.has_next_page:
+            if not response.page_info.has_next_page or not response.page_info.end_cursor:
                 break
             current_cursor = response.page_info.end_cursor
 

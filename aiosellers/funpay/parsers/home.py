@@ -107,17 +107,24 @@ def parse_home(html: str) -> AccountSnapshot:
     user_raw = app.get("userId") or 0
     sales = soup.select_one("span.badge.badge-trade")
     purchases = soup.select_one("span.badge.badge-orders")
+
+    def _badge(node) -> int:
+        text = node.get_text(strip=True) if node is not None else ""
+        match = re.search(r"\d+", text)
+        return int(match.group(0)) if match else 0
+
+    try:
+        user_id = int(user_raw or 0)
+    except (TypeError, ValueError):
+        user_id = 0
+
     return AccountSnapshot(
-        id=int(user_raw or 0),
+        id=user_id,
         username=username,
         csrf_token=str(app.get("csrf-token") or ""),
         locale=app.get("locale"),
-        active_sales=int(sales.get_text(strip=True)) if sales and sales.get_text(strip=True) else 0,
-        active_purchases=(
-            int(purchases.get_text(strip=True))
-            if purchases and purchases.get_text(strip=True)
-            else 0
-        ),
+        active_sales=_badge(sales),
+        active_purchases=_badge(purchases),
         categories=parse_categories(html),
     )
 

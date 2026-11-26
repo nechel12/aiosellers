@@ -2,13 +2,72 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+## [0.4.0] - 2026-11-26
+
+### Changed
+
+- PlayerOK ignores the seller's own messages by default. Set
+  `include_own=True` to continue receiving them.
+- Identity maps are shared and bounded by default. Set `identity_map_limit=None`
+  to retain cached entities for the entire session.
+- FunPay rejects sending text and an image in one message and passing
+  `leave_as_unread=True` with `ValueError`. These options were previously ignored.
+- FunPay `OrderAPI.iter(limit=...)` applies the limit to the entire iterator
+  rather than to each page.
+
+### Fixed
+
+- PlayerOK queues active deals for review polling at startup and keeps them
+  eligible beyond the previous 15-minute window. It records review IDs to avoid
+  re-emitting existing reviews. Checkpoint migration preserves pending reviews.
+- After reconnecting, PlayerOK replays unprocessed messages within the history
+  window and subscribes to newly discovered chats. Resuming from a checkpoint
+  no longer marks messages missed during downtime as seen. Concurrent collectors
+  deduplicate payment events.
+- PlayerOK image messages produce `NewMessageEvent`, and `NewReviewEvent`
+  carries the review.
+- PlayerOK filtered chat/deal pagination no longer stops after the first page
+  when every row is filtered out.
+- PlayerOK `Item.game_id`, `Chat.get_deals().item_id`, missing-user raw lookups,
+  false GraphQL boolean filters, `remove_item` results and `GameAPI.limit` are
+  fixed.
+- PlayerOK `close()` now stops an active listener; `aclose()` wakes a blocked
+  event consumer; state loading during `listen()` is retried.
+- PlayerOK sends one WebSocket `Origin` header, preserves the scheme and port
+  of custom base URLs, and honors an explicit `ws_url`. Cloudflare detection no
+  longer matches ordinary chat text.
+- FunPay review `stars` filters force a fresh order lookup instead of using a
+  cached shortcut order.
+- FunPay chat/order gap pagination now grows its page window until the gap is
+  collected, and listener options are exposed through `listen()`. Sparse
+  message IDs no longer stall new chats, and item descriptions no longer
+  affect refund status parsing.
+- FunPay identity-map merges are partial for shortcut rows and full for detail
+  rows, so list refreshes no longer erase order details.
+- FunPay message history pagination, Ukrainian
+  system-message classification, locale-independent stale-cookie detection,
+  custom-host cookie storage, badge parsing and malformed `sent` state are fixed.
+- Concurrent calls share FunPay startup.
+- GGsel partial product updates no longer erase fields, new chats only replay
+  recent history, one malformed row no longer stops polling, chat lookup covers
+  a wider window, and history/category pagination is bounded correctly. Active
+  chat cursors survive a small `state_limit` without repeated initialization
+  events.
+- `SellerHub` auto-generated session ids skip explicitly registered ids.
+- Event listeners commit durable state after events are yielded by the public
+  `listen()` path, reducing event loss on crashes. For PlayerOK, adding events
+  to the internal queue does not commit them, and events from a single payment
+  message are committed together.
+
 ## [0.3.7] - 2026-11-18
 
 ### Changed
 
-- `uv.lock` is in sync with the package version and the `soupsieve` 4.0 security
-  bump (CVE-2026-126190). CI, dependency audit, CodeQL and wheel build are green
-  again.
+- Updated `uv.lock` to match the package version and the `soupsieve` 4.0
+  security update (CVE-2026-126190). CI, dependency audit, CodeQL, and the wheel
+  build passed for this release.
 
 ## [0.3.6] - 2026-11-18
 
@@ -16,18 +75,18 @@ All notable changes to this project are documented in this file.
 
 - GraphQL multipart mutations with zero attachments are now sent as form data
   instead of JSON. `createItem` always wraps its query in `operations`/`map`;
-  sending that as JSON made Playerok reject it with
+  sending that as JSON caused PlayerOK to reject it with
   "GraphQL operations must contain a non-empty `query` or a `persistedQuery` extension".
 
 ## [0.3.5] - 2026-11-18
 
 ### Fixed
 
-- Playerok public item search now sends only `APPROVED` status; the previous
+- PlayerOK public item search now sends only `APPROVED` status; the previous
   multi-status filter made the live API return an empty page.
-- Non-JSON GraphQL responses raise a clear `GraphQLError` instead of crashing in
-  `tls_requests` with a broken `JSONDecodeError`.
-- HTTP errors now include a short response-body snippet for debugging Playerok
+- Non-JSON GraphQL responses raise `GraphQLError` instead of propagating a
+  `JSONDecodeError` from `tls_requests`.
+- HTTP errors now include a short response-body excerpt for debugging PlayerOK
   400/429/500 replies.
 - `Playerok.start_polling()` no longer closes the session on unexpected event-feed
   failures; explicit `stop()`/cancellation still closes it.
@@ -36,12 +95,11 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
-- `AIOSELLERS_MEDIA_ROOTS` confines the local paths that media uploads may read.
-  FunPay and Playerok accept `str`/`Path` in `image`/`photo` and read them from the
-  disk of the running process, which is a file-exposure primitive for any host that
-  forwards less-trusted arguments into `chats.send_message`/`upload_image`. Unset
-  keeps the historical behaviour; set (including to an empty value) opens only paths
-  under the listed roots and raises `MediaPathNotAllowedError` otherwise.
+- `AIOSELLERS_MEDIA_ROOTS` restricts local file access during media uploads.
+  FunPay and PlayerOK read local `str` and `Path` arguments from the process's
+  filesystem. When the variable is unset, any readable path is allowed. When it
+  is set, paths outside the listed roots raise `MediaPathNotAllowedError`. An
+  empty value disallows all local paths.
 
 ## [0.3.3] - 2026-10-31
 
@@ -51,7 +109,7 @@ All notable changes to this project are documented in this file.
   first releases with Python 3.14 support, including cp314 wheels. The test suite
   passes with these minimums and with the latest lxml 6.1.3 and websockets 17.4 on
   Python 3.12 and 3.14.
-- Release tags are signed with a dedicated SSH signing key.
+- The `v0.3.3` release tag was signed with a dedicated SSH key.
 
 ## [0.3.2] - 2026-10-30
 

@@ -67,7 +67,7 @@ class ChatMessagesAPI:
 
             remain -= len(response.messages)
 
-            if not response.page_info.has_next_page:
+            if not response.page_info.has_next_page or not response.page_info.end_cursor:
                 break
             current_cursor = response.page_info.end_cursor
 
@@ -86,7 +86,7 @@ class ChatMessagesAPI:
             for msg in response.messages:
                 yield self._create_message(msg, chat_id)
 
-            if not response.page_info.has_next_page:
+            if not response.page_info.has_next_page or not response.page_info.end_cursor:
                 break
             current_cursor = response.page_info.end_cursor
 
@@ -115,6 +115,18 @@ class ChatAPI:
                 user = User.from_schema(u, self._client)
                 name = u.username
 
+        if self._client._use_identity_map:
+            cached = self._client._identity_maps.chats.get(schema.id)
+            if cached is not None:
+                cached.type = schema.type
+                cached.unread_messages_counter = schema.unread_messages_counter
+                if schema.users:
+                    cached.user_id = user_id
+                    cached.user = user
+                    cached.name = name
+                cached._client = self._client
+                return cached
+
         chat = Chat(
             id=schema.id,
             type=schema.type,
@@ -125,6 +137,8 @@ class ChatAPI:
         )
 
         chat._client = self._client
+        if self._client._use_identity_map:
+            self._client._identity_maps.chats.set(chat.id, chat)
         return chat
 
     async def get(self, chat_id: str, *, force_refresh: bool = False) -> Chat | None:
@@ -169,6 +183,7 @@ class ChatAPI:
             if response is None or not response.chats:
                 break
 
+            added = 0
             for schema in response.chats:
                 chat = self._create_chat(schema)
 
@@ -182,15 +197,16 @@ class ChatAPI:
                     self._client._identity_maps.chats.set(chat.id, chat)
 
                 result.append(chat)
+                added += 1
                 if len(result) >= limit:
                     break
 
             if len(result) >= limit:
                 break
 
-            remain -= len(response.chats)
+            remain -= added
 
-            if not response.page_info.has_next_page:
+            if not response.page_info.has_next_page or not response.page_info.end_cursor:
                 break
             current_cursor = response.page_info.end_cursor
 
@@ -231,7 +247,7 @@ class ChatAPI:
 
                 yield chat
 
-            if not response.page_info.has_next_page:
+            if not response.page_info.has_next_page or not response.page_info.end_cursor:
                 break
             current_cursor = response.page_info.end_cursor
 
@@ -280,7 +296,7 @@ class ChatAPI:
             if len(result) >= limit:
                 break
             remain -= len(response.templates)
-            if not response.page_info.has_next_page:
+            if not response.page_info.has_next_page or not response.page_info.end_cursor:
                 break
             current_cursor = response.page_info.end_cursor
         return result[:limit]

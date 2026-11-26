@@ -177,6 +177,7 @@ class GameCategory:
         attributes: list[dict[str, str]] | None = None,
         search: str | None = None,
         sort: ItemsSortOptions | None = None,
+        statuses: list[str] | None = None,
     ) -> list["Item"]:
         return await self._require_client().items.list(
             limit=limit,
@@ -191,6 +192,7 @@ class GameCategory:
             attributes=attributes,
             search=search,
             sort=sort,
+            statuses=statuses,
         )
 
     async def iter_items(
@@ -205,6 +207,7 @@ class GameCategory:
         attributes: list[dict[str, str]] | None = None,
         search: str | None = None,
         sort: ItemsSortOptions | None = None,
+        statuses: list[str] | None = None,
     ) -> AsyncIterator["Item"]:
         async for item in self._require_client().items.iter(
             cursor=cursor,
@@ -218,6 +221,7 @@ class GameCategory:
             attributes=attributes,
             search=search,
             sort=sort,
+            statuses=statuses,
         ):
             yield item
 
@@ -275,6 +279,7 @@ class Game:
         attributes: list[dict[str, str]] | None = None,
         search: str | None = None,
         sort: ItemsSortOptions | None = None,
+        statuses: list[str] | None = None,
     ) -> list["Item"]:
         return await self._require_client().items.list(
             limit=limit,
@@ -289,6 +294,7 @@ class Game:
             attributes=attributes,
             search=search,
             sort=sort,
+            statuses=statuses,
         )
 
     async def iter_items(
@@ -304,6 +310,7 @@ class Game:
         attributes: list[dict[str, str]] | None = None,
         search: str | None = None,
         sort: ItemsSortOptions | None = None,
+        statuses: list[str] | None = None,
     ) -> AsyncIterator["Item"]:
         async for item in self._require_client().items.iter(
             cursor=cursor,
@@ -317,5 +324,6 @@ class Game:
             attributes=attributes,
             search=search,
             sort=sort,
+            statuses=statuses,
         ):
             yield item

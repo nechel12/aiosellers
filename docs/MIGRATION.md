@@ -1,16 +1,17 @@
 # Migration from upstream aiosellers
 
-The fork keeps the import package `aiosellers` and the familiar adapter names.
-Only the **distribution** name is different, so it can coexist with the upstream
-PyPI project.
+The fork retains the `aiosellers` import package and the upstream adapter names.
+The **distribution** name is different, but both distributions install the
+same import package. Uninstall upstream first or use a separate environment;
+do not install both in one environment.
 
 ## Install name
 
 | Source | Command |
 |---|---|
-| GitHub (works now) | `pip install "git+https://github.com/nechel12/aiosellers.git"` |
-| GitHub, pinned | `pip install "git+https://github.com/nechel12/aiosellers.git@v0.3.0"` |
 | PyPI | `pip install aiosellers-nechel12` |
+| GitHub | `pip install "git+https://github.com/nechel12/aiosellers.git"` |
+| GitHub, pinned | `pip install "git+https://github.com/nechel12/aiosellers.git@<tag-or-commit>"` |
 | Upstream (not this fork) | `pip install aiosellers` |
 
 The import package is always:
@@ -19,22 +20,34 @@ The import package is always:
 import aiosellers
 ```
 
+## Updating to 0.4.0
+
+- Set `PlayerokClientConfig(include_own=True)` if the application handles the
+  seller's own messages. The listener no longer emits them by default.
+- Identity-map entries can be evicted once a cache reaches its limit. Set
+  `identity_map_limit=None` if the application needs identity to be preserved
+  for the entire session.
+- Send FunPay text and images separately. Remove `leave_as_unread=True` from
+  send calls. FunPay now raises `ValueError` for those unsupported options.
+- FunPay `orders.iter(limit=...)` now caps the total number of orders yielded,
+  not the number of orders per page.
+
 ## What changed in 0.3.0
 
 - `SellerHub.stream()` no longer deadlocks when the consumer leaves the stream
   while the bounded queue is full.
-- `Chat.iter_messages()` now works and returns an async iterator. Use it with
+- `Chat.iter_messages()` returns an async iterator. Use it with
   `async for`; do not `await` the method itself.
 - `Account.lastItemCreatedAt` accepts `null`, which is required for sellers
   without items.
-- Custom Playerok/GGsel `base_url` values without a trailing slash are
+- Custom PlayerOK and GGsel `base_url` values without a trailing slash are
   normalized.
 - `SQLiteStateStore("~/state.db")` expands `~`.
 - `stop()` is available on every client.
 - GGsel is part of the shared `Platform`/`EventKind`/`SellerHub` model.
 - The distribution is `aiosellers-nechel12`; the import package is still
   `aiosellers`.
-- CI now enforces formatting, mypy, coverage and Python 3.12/3.13/3.14.
+- CI checks formatting, types, and coverage on Python 3.12, 3.13, and 3.14.
 
 ## Upgrade steps
 
@@ -51,7 +64,7 @@ import aiosellers
 
 ## State compatibility
 
-The listener state schema version is still `1`. Existing keys work:
+The listener state schema remains at version `1` and uses the following keys:
 
 ```text
 funpay:{account_id}:listener
@@ -60,9 +73,12 @@ ggsel:{seller_id}:listener
 ```
 
 `MemoryStateStore` is for tests. `SQLiteStateStore` persists chat cursors,
-processed message ids and order snapshots; treat the database file as sensitive.
+processed message IDs and order statuses. FunPay state can also contain message
+previews; treat the database file as sensitive.
 
 ## Need help
 
-Open an issue with the platform, version/tag, Python version and a minimal
-reproduction. Do not include API keys, golden keys, access tokens or buyer data.
+Use the [bug report form](https://github.com/nechel12/aiosellers/issues/new/choose)
+with the platform, installed package version or Git tag, Python version, and a
+minimal reproduction. Do not include API keys, golden keys, access tokens, or
+buyer data. Report vulnerabilities through [SECURITY.md](../SECURITY.md).

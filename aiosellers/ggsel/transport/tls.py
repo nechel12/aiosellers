@@ -264,10 +264,14 @@ class GGselTransport:
             return text
         if isinstance(data, dict):
             retval = data.get("retval")
-            if isinstance(retval, int) and retval < 0:
+            try:
+                numeric_retval = int(retval) if retval is not None else None
+            except (TypeError, ValueError):
+                numeric_retval = None
+            if numeric_retval is not None and numeric_retval < 0:
                 raise ApiError(
                     data.get("retdesc") or "GGsel returned an error",
-                    retval=retval,
+                    retval=numeric_retval,
                 )
         return data
 

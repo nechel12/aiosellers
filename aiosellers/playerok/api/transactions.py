@@ -77,7 +77,7 @@ class TransactionAPI:
             if len(result) >= limit:
                 break
             remain -= len(response.transactions)
-            if not response.page_info.has_next_page:
+            if not response.page_info.has_next_page or not response.page_info.end_cursor:
                 break
             current_cursor = response.page_info.end_cursor
         return result[:limit]
@@ -111,7 +111,7 @@ class TransactionAPI:
                 return
             for schema in response.transactions:
                 yield self._create(schema)
-            if not response.page_info.has_next_page:
+            if not response.page_info.has_next_page or not response.page_info.end_cursor:
                 break
             current_cursor = response.page_info.end_cursor
 
@@ -145,7 +145,7 @@ class TransactionAPI:
             if len(result) >= limit:
                 break
             remain -= len(response.bank_cards)
-            if not response.page_info.has_next_page:
+            if not response.page_info.has_next_page or not response.page_info.end_cursor:
                 break
             current_cursor = response.page_info.end_cursor
         return result[:limit]

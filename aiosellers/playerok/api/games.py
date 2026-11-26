@@ -65,33 +65,44 @@ class GameAPI:
         return category
 
     def _create_game(self, schema) -> Game:
-        if self._client._use_identity_map and hasattr(schema, "id"):
-            cached = self._client._identity_maps.games.get(schema.id)
-            if cached:
-                return cached
-
         from ..entities.file import File
 
-        game = Game(
+        cached = (
+            self._client._identity_maps.games.get(schema.id)
+            if self._client._use_identity_map and hasattr(schema, "id")
+            else None
+        )
+        game = cached or Game(
             id=schema.id,
             name=schema.name,
             slug=schema.slug,
             type=schema.type,
-            logo=File.from_schema(schema.logo) if schema.logo else None,
+            logo=None,
             categories=[],
         )
+        game.name = schema.name
+        game.slug = schema.slug
+        game.type = schema.type
+        game.logo = File.from_schema(schema.logo) if schema.logo else None
         game._client = self._client
 
+        existing = {category.id: category for category in game.categories}
+        categories: list[GameCategory] = []
         for cat_schema in schema.categories:
-            category = GameCategory(
+            category = existing.get(cat_schema.id) or GameCategory(
                 id=cat_schema.id,
                 name=cat_schema.name,
                 slug=cat_schema.slug,
                 game_id=game.id,
                 game=game,
             )
+            category.name = cat_schema.name
+            category.slug = cat_schema.slug
+            category.game_id = game.id
+            category.game = game
             category._client = self._client
-            game.categories.append(category)
+            categories.append(category)
+        game.categories = categories
 
         if self._client._use_identity_map:
             self._client._identity_maps.games.set(game.id, game)
@@ -139,7 +150,7 @@ class GameAPI:
 
             remain -= len(response.games)
 
-            if not response.page_info.has_next_page:
+            if not response.page_info.has_next_page or not response.page_info.end_cursor:
                 break
             current_cursor = response.page_info.end_cursor
 
@@ -166,7 +177,7 @@ class GameAPI:
             for schema in response.games:
                 yield self._create_game(schema)
 
-            if not response.page_info.has_next_page:
+            if not response.page_info.has_next_page or not response.page_info.end_cursor:
                 break
             current_cursor = response.page_info.end_cursor
 
@@ -201,7 +212,7 @@ class GameAPI:
                 value_range = option.value_range_limit
                 minimal_value = min(0, value_range.min or 0) if value_range else 0
                 maximal_value = max(0, value_range.max or 0) if value_range else 0
-                for i in range(minimal_value, maximal_value):
+                for i in range(minimal_value, maximal_value + 1):
                     option_object.possible_values.append(
                         OptionValue(value=str(i), name=str(i), _option=option_object)
                     )
@@ -239,13 +250,19 @@ class GameAPI:
                 )
                 obj._client = self._client
                 result.append(obj)
+                if len(result) >= limit:
+                    break
 
-            if not response.page_info.has_next_page:
+            if (
+                len(result) >= limit
+                or not response.page_info.has_next_page
+                or not response.page_info.end_cursor
+            ):
                 break
             current_cursor = response.page_info.end_cursor
-            remain -= len(response.obtaining_types)  # Approximate
+            remain -= len(response.obtaining_types)
 
-        return result
+        return result[:limit]
 
     async def get_agreements(
         self,
@@ -280,13 +297,19 @@ class GameAPI:
                 )
                 obj._client = self._client
                 result.append(obj)
+                if len(result) >= limit:
+                    break
 
-            if not response.page_info.has_next_page:
+            if (
+                len(result) >= limit
+                or not response.page_info.has_next_page
+                or not response.page_info.end_cursor
+            ):
                 break
             current_cursor = response.page_info.end_cursor
             remain -= len(response.agreements)
 
-        return result
+        return result[:limit]
 
     async def accept_agreement(self, agreement_id: str) -> bool:
         resp = await self._client._require_raw().games.accept_game_category_agreement(
@@ -324,13 +347,19 @@ class GameAPI:
                 )
                 obj._client = self._client
                 result.append(obj)
+                if len(result) >= limit:
+                    break
 
-            if not response.page_info.has_next_page:
+            if (
+                len(result) >= limit
+                or not response.page_info.has_next_page
+                or not response.page_info.end_cursor
+            ):
                 break
             current_cursor = response.page_info.end_cursor
             remain -= len(response.instructions)
 
-        return result
+        return result[:limit]
 
     async def get_data_fields(
         self,
@@ -367,7 +396,7 @@ class GameAPI:
                 )
                 result.append(obj)
 
-            if not response.page_info.has_next_page:
+            if not response.page_info.has_next_page or not response.page_info.end_cursor:
                 break
             current_cursor = response.page_info.end_cursor
 

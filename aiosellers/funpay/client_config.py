@@ -20,6 +20,7 @@ class FunPayClientConfig:
         locale: Optional locale prefix. ru and None stay unprefixed.
         proxy: Proxy URL passed through to tls_requests when supported.
         use_identity_map: Reuse entity instances for the same id.
+        identity_map_limit: Maximum cached entities per identity bucket (None = unlimited).
         poll_interval: Seconds between listener ticks.
         session_refresh_seconds: How long a parsed home page stays fresh.
         handler_timeout: Max seconds a single event handler may run (None disables).
@@ -36,6 +37,7 @@ class FunPayClientConfig:
     locale: Literal["ru", "en", "uk"] | None = None
     proxy: str | None = field(default=None, repr=False)
     use_identity_map: bool = True
+    identity_map_limit: int | None = 5000
     poll_interval: float = 6.0
     session_refresh_seconds: float = 2400.0
     handler_timeout: float | None = 30.0
