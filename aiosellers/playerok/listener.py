@@ -504,6 +504,13 @@ class EventListener:
         fetched = await self._refetch_deal(deal_schema.id)
         if fetched is not None:
             deal_schema = fetched
+        # The socket and chat poll can both reach this point after network
+        # awaits. Check again before constructing and recording the events.
+        if message.id in self.processed_message_ids:
+            return []
+        if EventTypes.NEW_DEAL in kinds and deal_schema.id in self.processed_deal_ids:
+            self._mark_message(message.id)
+            return []
         deal = self.client.deals._create_deal(deal_schema)
         entity_message = self.client.chats.messages._create_message(actual, chat.id)
         events: list[PlayerokEvent] = []
@@ -563,7 +570,8 @@ class EventListener:
         if messages:
             page = await self._raw().chats.get_chats(user_id=self._me_id(), count=24)
             chats = list(page.chats) if page is not None else []
-            self.remember_history(chats)
+            if not self._needs_resync:
+                self.remember_history(chats)
             for chat_schema in chats:
                 chat_schema = self.remember_chat(chat_schema)
                 self._remember_chat_id(chat_schema.id)
@@ -814,12 +822,14 @@ class EventListener:
                 break
             for message in page.messages:
                 collected.setdefault(message.id, message)
-            if any(message.id in self.processed_message_ids for message in page.messages):
-                break
             page_info = getattr(page, "page_info", None)
             if page_info is None:
                 break
-            if not page_info.has_next_page or not page_info.end_cursor:
+            if (
+                not page_info.has_next_page
+                or not page_info.end_cursor
+                or page_info.end_cursor == cursor
+            ):
                 break
             cursor = page_info.end_cursor
         return sorted(
@@ -832,45 +842,39 @@ class EventListener:
     ) -> list[PlayerokEvent]:
         """Emit every unprocessed message we can see for one chat.
 
-        If a processed message is present in the recent page, everything newer
-        than it is emitted.  If no processed message is found, only messages
-        inside the history grace window are considered, which avoids replaying
-        old history for chats discovered late.
+        A known message anchors the history. Use the oldest visible anchor
+        to catch missing messages between already delivered messages.
+        Without an anchor, only replay messages in the history grace window.
         """
         rows = await self._recent_messages(chat_schema.id)
         chat = self.chat_from(chat_schema)
         events: list[PlayerokEvent] = []
-        if not rows:
-            last = chat_schema.last_message
-            if last is not None:
-                age = (now - _as_utc(last.created_at)).total_seconds()
-                if age <= self.history_grace_seconds and last.id not in self.processed_message_ids:
-                    events.extend(await self.events_for_message(chat, last, persist=False))
-            return events
+        last = chat_schema.last_message
+        if last is not None and all(message.id != last.id for message in rows):
+            rows.append(last)
+            rows.sort(key=lambda message: (_as_utc(message.created_at), message.id))
 
-        processed_at = [
-            index for index, message in enumerate(rows) if message.id in self.processed_message_ids
-        ]
-        if processed_at:
-            candidates = rows[max(processed_at) + 1 :]
-        else:
-            candidates = [
-                message
+        anchor = min(
+            (
+                _as_utc(message.created_at)
                 for message in rows
-                if (now - _as_utc(message.created_at)).total_seconds() <= self.history_grace_seconds
-            ]
-        for message in candidates:
+                if message.id in self.processed_message_ids
+            ),
+            default=None,
+        )
+        for message in rows:
             if message.id in self.processed_message_ids:
                 continue
-            events.extend(await self.events_for_message(chat, message, persist=False))
-        last = chat_schema.last_message
-        if (
-            last is not None
-            and last.id not in self.processed_message_ids
-            and all(message.id != last.id for message in rows)
-            and (now - _as_utc(last.created_at)).total_seconds() <= self.history_grace_seconds
-        ):
-            events.extend(await self.events_for_message(chat, last, persist=False))
+            created_at = _as_utc(message.created_at)
+            if anchor is not None:
+                if created_at < anchor:
+                    continue
+            elif (now - created_at).total_seconds() > self.history_grace_seconds:
+                continue
+            try:
+                events.extend(await self.events_for_message(chat, message, persist=False))
+            except Exception:
+                logger.debug("Playerok resync failed for message %s", message.id, exc_info=True)
         return events
 
     async def _on_chat_updated(self, data: dict[str, Any]) -> list[PlayerokEvent]:

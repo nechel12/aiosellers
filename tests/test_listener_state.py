@@ -1,5 +1,6 @@
+import asyncio
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest import mock
 
@@ -371,6 +372,63 @@ class _FlakyPlayerokStateStore:
 
 
 class PlayerokStateTests(unittest.IsolatedAsyncioTestCase):
+    async def test_restart_does_not_baseline_messages_missed_while_offline(self):
+        store = MemoryStateStore()
+        await store.set("playerok:me:listener", {"version": 1, "messages": ["seen"]})
+        age = datetime.now(timezone.utc) - timedelta(minutes=5)
+        seen = _playerok_message("seen", "old").model_copy(update={"created_at": age})
+        missed = _playerok_message("missed", "offline").model_copy(
+            update={"created_at": age + timedelta(seconds=1)}
+        )
+        chat = ChatSchema(id="c1", type=ChatTypes.PM, last_message=missed)
+        raw = _PlayerokRaw()
+        raw.get_chats = mock.AsyncMock(return_value=SimpleNamespace(chats=[chat]))
+        raw.get_chat_messages = mock.AsyncMock(
+            return_value=SimpleNamespace(messages=[missed, seen])
+        )
+        listener = _playerok_listener(_playerok_client(raw), store)
+
+        async def socket_events():
+            for event in await listener._resync():
+                yield event
+
+        with mock.patch.object(listener, "_socket_events", socket_events):
+            stream = listener.listen(reviews=False)
+            try:
+                first = await anext(stream)
+                self.assertIs(first.type, PlayerokEventTypes.CHAT_INITIALIZED)
+                event = await asyncio.wait_for(anext(stream), 1)
+                self.assertEqual(event.message.id, "missed")
+            finally:
+                await stream.aclose()
+
+    async def test_concurrent_collectors_emit_payment_events_only_once(self):
+        for later_id in ("m1", "m2"):
+            with self.subTest(later_id=later_id):
+                raw = _PlayerokRaw(deal=_playerok_deal())
+                gate = asyncio.Barrier(2)
+
+                async def get_deal(deal_id):
+                    await gate.wait()
+                    return raw.deal
+
+                raw.get_deal = get_deal
+                client = _playerok_client(raw)
+                listener = _playerok_listener(client, MemoryStateStore())
+                chat = client.chats._create_chat(ChatSchema(id="c1", type=ChatTypes.PM))
+                messages = [
+                    _playerok_message(message_id, "{{ITEM_PAID}}", "deal-1")
+                    for message_id in ("m1", later_id)
+                ]
+                batches = await asyncio.wait_for(
+                    asyncio.gather(*(listener.events_for_message(chat, msg) for msg in messages)),
+                    1,
+                )
+                self.assertEqual(
+                    [event.type for batch in batches for event in batch],
+                    [PlayerokEventTypes.NEW_DEAL, PlayerokEventTypes.ITEM_PAID],
+                )
+
     async def test_new_message_is_marked_only_after_entity_construction(self):
         client = _playerok_client(_PlayerokRaw())
         listener = _playerok_listener(client, MemoryStateStore())

@@ -15,6 +15,7 @@ from aiosellers.playerok.core.config import PlayerokConfig
 from aiosellers.playerok.events import ChatInitializedEvent, NewMessageEvent, NewReviewEvent
 from aiosellers.playerok.listener import EventListener
 from aiosellers.playerok.schemas import Chat as ChatSchema
+from aiosellers.playerok.schemas import ChatMessage as ChatMessageSchema
 from aiosellers.playerok.schemas import ItemDeal
 
 
@@ -285,6 +286,34 @@ class SocketLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ResyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_resync_fills_a_gap_behind_an_already_delivered_message(self):
+        old = datetime.now(timezone.utc) - timedelta(minutes=5)
+        anchor, missed, latest = [
+            ChatMessageSchema.model_validate(
+                _recent_message(message_id) | {"createdAt": old + timedelta(seconds=index)}
+            )
+            for index, message_id in enumerate(("anchor", "missed", "latest"))
+        ]
+        chat = ChatSchema(id="c1", type="PM", last_message=latest)
+        raw = _RawChats(page=_chat_page(chat))
+        raw.get_chat_messages = mock.AsyncMock(
+            side_effect=[
+                SimpleNamespace(
+                    messages=[latest],
+                    page_info=SimpleNamespace(has_next_page=True, end_cursor="page-2"),
+                ),
+                SimpleNamespace(messages=[missed, anchor]),
+            ]
+        )
+        listener = EventListener(_Client(chats=raw))
+        listener.processed_message_ids.update({"anchor", "latest"})
+
+        events = await listener._resync()
+        self.assertEqual(
+            [event.message.id for event in events if isinstance(event, NewMessageEvent)],
+            ["missed"],
+        )
+
     async def test_resync_emits_new_chat_and_unseen_message(self):
         chat = ChatSchema.model_validate(
             {"id": "c1", "type": "PM", "lastMessage": _recent_message()}
