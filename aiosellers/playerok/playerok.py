@@ -49,6 +49,8 @@ class _IdentityMaps:
 class Playerok:
     """High-level Playerok client with modular API."""
 
+    platform = "playerok"
+
     def __init__(self, config: PlayerokClientConfig | str | None = None) -> None:
         """Initialize Playerok client.
 
@@ -69,15 +71,17 @@ class Playerok:
         self._use_identity_map = config.use_identity_map
         self._me_id: str | None = None
         self._polling_task: asyncio.Task | None = None
+        self._listener: EventListener | None = None
         self._lifecycle_lock = asyncio.Lock()
 
         if self._use_identity_map:
+            limit = config.identity_map_limit
             self._identity_maps = _IdentityMaps(
-                users=IdentityMap(),
-                chats=IdentityMap(),
-                deals=IdentityMap(),
-                games=IdentityMap(),
-                items=IdentityMap(),
+                users=IdentityMap(limit),
+                chats=IdentityMap(limit),
+                deals=IdentityMap(limit),
+                games=IdentityMap(limit),
+                items=IdentityMap(limit),
             )
 
         self.account = AccountAPI(self)
@@ -124,6 +128,7 @@ class Playerok:
                     request_timeout=self._config.request_timeout,
                     base_url=self._config.base_url,
                     proxy=self._config.proxy,
+                    ws_url=self._config.ws_url,
                 ),
             )
             raw = RawAPI(transport)
@@ -138,8 +143,11 @@ class Playerok:
             self._me_id = me.id
 
     async def close(self) -> None:
-        """Close the client."""
+        """Close the client and stop an active listener."""
         async with self._lifecycle_lock:
+            listener, self._listener = self._listener, None
+            if listener is not None:
+                await listener.aclose()
             if self._transport is None:
                 return
 
@@ -165,9 +173,18 @@ class Playerok:
         if self._transport is None:
             raise RuntimeError("Client is not started. Call start() or start_polling() first.")
         listener_options.setdefault("state", self._config.state)
-        return EventListener(self, **listener_options).listen(messages=messages, reviews=reviews)
+        listener_options.setdefault("include_own", self._config.include_own)
+        listener = EventListener(self, **listener_options)
+        self._listener = listener
+        return listener.listen(messages=messages, reviews=reviews)
 
-    async def start_polling(self, *, messages: bool = True, reviews: bool = True) -> None:
+    async def start_polling(
+        self,
+        *,
+        messages: bool = True,
+        reviews: bool = True,
+        **listener_options: Any,
+    ) -> None:
         """Start the session and dispatch decorator handlers.
 
         The session is closed on normal completion or explicit :meth:`stop`.
@@ -178,7 +195,7 @@ class Playerok:
         await self.start()
         self._polling_task = asyncio.current_task()
         try:
-            async for event in self.listen(messages=messages, reviews=reviews):
+            async for event in self.listen(messages=messages, reviews=reviews, **listener_options):
                 await self._dispatch(event)
         except asyncio.CancelledError:
             await self.close()

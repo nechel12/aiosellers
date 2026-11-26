@@ -39,23 +39,26 @@ class AccountAPI:
                 return cached
 
         profile = await self._client._require_raw().account.get_user(id=user_id, username=username)
+        cached = (
+            self._client._identity_maps.users.get(user_id)
+            if user_id and self._client._use_identity_map
+            else None
+        )
         if profile is None:
             if user_id:
                 # Create stub user with just ID
-                user = User(id=user_id)
+                user = cached or User(id=user_id)
             else:
                 raise ValueError(f"User with username '{username}' not found")
         else:
-            user = User(
-                id=profile.id,
-                username=profile.username,
-                avatar_url=profile.avatar_url,
-                role=profile.role,
-                is_online=profile.is_online,
-                is_blocked=profile.is_blocked,
-                rating=profile.rating,
-                reviews_count=profile.reviews_count,
-            )
+            user = cached or User(id=profile.id)
+            user.username = profile.username
+            user.avatar_url = profile.avatar_url
+            user.role = profile.role
+            user.is_online = profile.is_online
+            user.is_blocked = profile.is_blocked
+            user.rating = profile.rating
+            user.reviews_count = profile.reviews_count
 
         user._client = self._client
 
@@ -103,7 +106,7 @@ class AccountAPI:
             if len(result) >= limit:
                 break
             remain -= len(response.reviews)
-            if not response.page_info.has_next_page:
+            if not response.page_info.has_next_page or not response.page_info.end_cursor:
                 break
             current_cursor = response.page_info.end_cursor
         return result[:limit]

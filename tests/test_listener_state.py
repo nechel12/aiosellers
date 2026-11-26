@@ -193,7 +193,7 @@ class FunPayStateTests(unittest.IsolatedAsyncioTestCase):
             ORDER_ROW.format(order_id="ABCD1234"), side=OrderSide.SALE
         )
         events = await _funpay_listener(restarted_raw, store).tick(messages=False, purchases=False)
-        self.assertEqual([event.type for event in events], [FunPayEventTypes.ORDERS_LIST_CHANGED])
+        self.assertEqual(events, [])
 
     async def test_sent_message_ids_survive_restart(self):
         store = MemoryStateStore()

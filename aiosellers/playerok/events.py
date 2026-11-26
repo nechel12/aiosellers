@@ -96,6 +96,7 @@ class NewReviewEvent:
     client: Playerok
     chat: Chat
     deal: Deal
+    review: Any | None = None
     occurred_at: datetime = field(default_factory=_now)
     type: EventTypes = EventTypes.NEW_REVIEW
 

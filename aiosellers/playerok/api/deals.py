@@ -16,12 +16,29 @@ class DealAPI:
         self._client = client
 
     def _create_deal(self, schema) -> Deal:
+        user_id = schema.user.id if schema.user else None
+        chat_id = schema.chat.id if schema.chat else None
+        item_id = schema.item.id if schema.item else None
+
+        if self._client._use_identity_map:
+            cached = self._client._identity_maps.deals.get(schema.id)
+            if cached is not None:
+                cached.status = schema.status
+                if user_id is not None:
+                    cached.user_id = user_id
+                if chat_id is not None:
+                    cached.chat_id = chat_id
+                if item_id is not None:
+                    cached.item_id = item_id
+                cached._client = self._client
+                return cached
+
         deal = Deal(
             id=schema.id,
             status=schema.status,
-            user_id=schema.user.id if schema.user else None,
-            chat_id=schema.chat.id if schema.chat else None,
-            item_id=schema.item.id if schema.item else None,
+            user_id=user_id,
+            chat_id=chat_id,
+            item_id=item_id,
         )
         deal._client = self._client
 
@@ -67,6 +84,7 @@ class DealAPI:
             if response is None or not response.deals:
                 break
 
+            added = 0
             for schema in response.deals:
                 deal_user_id = schema.user.id if schema.user else None
                 deal_item_id = schema.item.id if schema.item else None
@@ -80,15 +98,16 @@ class DealAPI:
                     continue
 
                 result.append(self._create_deal(schema))
+                added += 1
                 if len(result) >= limit:
                     break
 
             if len(result) >= limit:
                 break
 
-            remain -= len(response.deals)
+            remain -= added
 
-            if not response.page_info.has_next_page:
+            if not response.page_info.has_next_page or not response.page_info.end_cursor:
                 break
             current_cursor = response.page_info.end_cursor
 
@@ -129,7 +148,7 @@ class DealAPI:
 
                 yield self._create_deal(schema)
 
-            if not response.page_info.has_next_page:
+            if not response.page_info.has_next_page or not response.page_info.end_cursor:
                 break
             current_cursor = response.page_info.end_cursor
 

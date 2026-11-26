@@ -59,6 +59,7 @@ class Item(ApiModel):
     deleted_at: datetime | None = Field(None, alias="deletedAt")
 
     # Extracted from nested objects
+    game_id: str | None = Field(None, alias="game")
     category_id: str | None = Field(None, alias="category")
     obtaining_type_id: str | None = Field(None, alias="obtainingType")
 
@@ -67,6 +68,12 @@ class Item(ApiModel):
     def _extract_nested_ids(cls, data):
         if not isinstance(data, dict):
             return data
+
+        # Extract game.id
+        if "game" in data:
+            game = data.get("game")
+            if isinstance(game, dict) and "id" in game:
+                data["game"] = game.get("id")
 
         # Extract category.id
         if "category" in data:

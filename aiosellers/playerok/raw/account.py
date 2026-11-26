@@ -38,11 +38,9 @@ class RawAccountService:
         _raise_on_gql_errors(raw)
 
         data = _dig(raw, ("data", "user"))
-        if data.get("__typename") == "User":
-            profile = data
-        else:
+        if not isinstance(data, dict) or data.get("__typename") != "User":
             return None
-        return AccountProfile(**profile)
+        return AccountProfile(**data)
 
     async def get_user(
         self, username: str | None = None, id: str | None = None
@@ -56,11 +54,16 @@ class RawAccountService:
         _raise_on_gql_errors(raw)
 
         data = _dig(raw, ("data", "user"))
+        if not isinstance(data, dict):
+            return None
+        profile: dict | None
         if data.get("__typename") == "UserFragment":
             profile = data
         elif data.get("__typename") == "User":
             profile = data.get("profile")
         else:
+            return None
+        if not isinstance(profile, dict):
             return None
         return UserProfile(**profile)
 

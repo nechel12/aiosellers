@@ -128,8 +128,17 @@ class PlayerokTransport:
 
     @staticmethod
     def _raise_if_cloudflare(response: Any) -> None:
-        # tls_requests.Response has .text property
-        if any(sig in response.text for sig in CLOUDFLARE_SIGNATURES):
+        # Cloudflare challenge pages are HTML error pages.  Looking at every
+        # GraphQL response caused false positives when a chat message merely
+        # contained one of the signature strings.
+        status = getattr(response, "status_code", 200)
+        text = getattr(response, "text", "") or ""
+        headers = getattr(response, "headers", None)
+        content_type = ""
+        if headers is not None and hasattr(headers, "get"):
+            content_type = str(headers.get("content-type") or "").lower()
+        is_html = content_type.startswith("text/html") or text.lstrip().startswith("<")
+        if (status >= 400 or is_html) and any(sig in text for sig in CLOUDFLARE_SIGNATURES):
             raise CloudflareDetected("The cloudflare protection is detected.")
 
     async def _exchange(

@@ -244,6 +244,7 @@ class GraphQLQuery:
         attributes: list[dict[str, str]] | None = None,
         search: str | None = None,
         sort: ItemsSortOptions | None = None,
+        statuses: list[str] | None = None,
     ) -> dict[str, Any]:
         filters: dict[str, Any]
         if user_id is None:
@@ -252,21 +253,21 @@ class GraphQLQuery:
                 "gameCategoryId": category_id,
                 # Live Playerok returns an empty page when several statuses are
                 # requested together; APPROVED is the only reliable public filter.
-                "status": ["APPROVED"],
+                "status": statuses or ["APPROVED"],
                 "withOfficial": False,
             }
         else:
             filters = {
                 "userId": user_id,
-                "status": ["APPROVED"],
+                "status": statuses or ["APPROVED"],
                 "withOfficial": False,
             }
 
         if minimal_price is not None or maximal_price is not None:
             filters["price"] = {"min": minimal_price, "max": maximal_price}
-        if has_discount:
+        if has_discount is not None:
             filters["hasDiscount"] = has_discount
-        if has_reviews:
+        if has_reviews is not None:
             filters["hasTestimonials"] = has_reviews
         if attributes:
             filters["attributes"] = attributes
@@ -733,9 +734,10 @@ class GraphQLQuery:
     ) -> dict[str, Any]:
         filters: dict[str, Any] = {
             "userId": user_id,
-            "hasComment": comment_required,
             "status": [status.name] if status else None,
         }
+        if comment_required:
+            filters["hasComment"] = True
         if game_id is not None:
             filters["gameId"] = game_id
         if category_id is not None:

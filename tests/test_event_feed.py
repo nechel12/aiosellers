@@ -205,8 +205,8 @@ class KnownChatTests(unittest.IsolatedAsyncioTestCase):
         listener.chat_subscriptions["sub"] = "c1"
         seen: list[str | None] = []
 
-        async def events_for_message(chat, message):
-            del message
+        async def events_for_message(chat, message, *, persist=True):
+            del message, persist
             seen.append(chat.name)
             return []
 
@@ -221,8 +221,8 @@ class KnownChatTests(unittest.IsolatedAsyncioTestCase):
         listener.chat_subscriptions["sub"] = "c1"
         seen: list[str | None] = []
 
-        async def events_for_message(chat, message):
-            del message
+        async def events_for_message(chat, message, *, persist=True):
+            del message, persist
             seen.append(chat.name)
             return []
 
@@ -254,8 +254,8 @@ class KnownChatTests(unittest.IsolatedAsyncioTestCase):
         listener.chat_subscriptions["sub"] = "c1"
         seen: list[str | None] = []
 
-        async def events_for_message(chat, message):
-            del message
+        async def events_for_message(chat, message, *, persist=True):
+            del message, persist
             seen.append(chat.name)
             return []
 

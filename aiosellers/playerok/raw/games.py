@@ -234,6 +234,6 @@ class RawGamesService:
         _raise_on_gql_errors(raw)
 
         data = _dig(raw, ("data", "gameCategory"))
-        if data is None:
+        if not isinstance(data, dict):
             return []
-        return [GameCategoryOption(**op) for op in data.get("options", [])]
+        return [GameCategoryOption(**op) for op in (data.get("options") or [])]

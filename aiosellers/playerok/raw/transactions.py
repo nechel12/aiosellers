@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from ..core.exceptions import UnsupportedPaymentProvider
+from ..core.exceptions import RequestFailedError, UnsupportedPaymentProvider
 from ..core.utils import _dig, _raise_on_gql_errors
 from ..graphql import GraphQLQuery as GQL
 from ..schemas import (
@@ -71,6 +71,8 @@ class RawTransactionService:
         _raise_on_gql_errors(raw)
 
         data = _dig(raw, ("data", "transactions"))
+        if not isinstance(data, dict):
+            raise RequestFailedError("Playerok returned no transactions payload")
         return TransactionList(**data)
 
     async def get_sbp_bank_members(self) -> list[SBPBankMember]:
@@ -96,6 +98,8 @@ class RawTransactionService:
         _raise_on_gql_errors(raw)
 
         data = _dig(raw, ("data", "verifiedCards"))
+        if not isinstance(data, dict):
+            raise RequestFailedError("Playerok returned no verified cards payload")
         return UserBankCardList(**data)
 
     async def delete_card(self, card_id: str) -> bool:
@@ -126,6 +130,8 @@ class RawTransactionService:
         _raise_on_gql_errors(raw)
 
         data = _dig(raw, ("data", "requestWithdrawal"))
+        if not isinstance(data, dict):
+            raise RequestFailedError("Playerok returned no withdrawal payload")
         return Transaction(**data)
 
     async def remove_transaction(self, transaction_id: str) -> Transaction:
@@ -136,4 +142,6 @@ class RawTransactionService:
         _raise_on_gql_errors(raw)
 
         data = _dig(raw, ("data", "removeTransaction"))
+        if not isinstance(data, dict):
+            raise RequestFailedError("Playerok returned no transaction payload")
         return Transaction(**data)
